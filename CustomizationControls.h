@@ -30,7 +30,7 @@ static std::map<void*,Backup> Backups;
 static std::atomic<HWND> Dialog{nullptr};
 static HWND Message=nullptr;
 static HWND EnabledBox=nullptr,InvertXBox=nullptr,InvertYBox=nullptr,YawBox=nullptr,PitchBox=nullptr;
-static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr;
+static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=nullptr,MouseSpeedBox=nullptr,MouseZoomBox=nullptr;
 static std::array<HWND,5> Keys{},Tuning{};
 static DWORD(WINAPI* PadState)(DWORD,XINPUT_STATE*)=nullptr;
 
@@ -55,7 +55,7 @@ static bool ReadOrbit(const State& s,float& x,float& y,bool& reset) {
         else {float gain=std::min(1.f,(length-s.deadzone)/(1-s.deadzone))/length;x*=gain;y*=gain;}
         reset=s.resetButtons&&(pad.Gamepad.wButtons&s.resetButtons)==s.resetButtons;
     }
-    if(!connected&&std::all_of(std::begin(s.keys),std::end(s.keys),[](uint32_t k){return k==0;}))return false;
+    if(!s.mouseEnabled&&!connected&&std::all_of(std::begin(s.keys),std::end(s.keys),[](uint32_t k){return k==0;}))return false;
     auto down=[&](unsigned key){return key&&(GetAsyncKeyState(int(key))&0x8000)!=0;};
     x=std::clamp(x+float(down(s.keys[1]))-float(down(s.keys[0])),-1.f,1.f);
     y=std::clamp(y+float(down(s.keys[2]))-float(down(s.keys[3])),-1.f,1.f);
@@ -78,7 +78,7 @@ static State LoadState(const std::string& name) {
         FileHeader header{};State candidate{},decoded{};
         stream.read(reinterpret_cast<char*>(&header),sizeof(header));
         if(!stream||std::memcmp(header.magic,"MWCLIN1",8)||header.version!=1||header.reserved||
-            (header.size!=sizeof(State)&&header.size!=LegacyStateBytes))return state;
+            (header.size!=sizeof(State)&&header.size!=Version2StateBytes&&header.size!=LegacyStateBytes))return state;
         stream.read(reinterpret_cast<char*>(&candidate),header.size);
         std::array<uint8_t,32> digest{};
         if(stream&&stream.peek()==EOF&&header.crc==CustomizationSave::Crc(&candidate,header.size)&&
@@ -160,6 +160,8 @@ static HWND Child(const wchar_t* type,const std::wstring& text,DWORD style,int x
     SendMessageW(result,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);return result;
 }
 static void Populate(const State& s){
+    SendMessageW(MouseBox,BM_SETCHECK,s.mouseEnabled?BST_CHECKED:BST_UNCHECKED,0);
+    SetWindowTextW(MouseSpeedBox,Number(s.mouseSensitivity).c_str());SetWindowTextW(MouseZoomBox,Number(s.mouseZoomStep).c_str());
     SendMessageW(ModeBox,CB_SETCURSEL,s.orbitMode,0);
     SendMessageW(EnabledBox,BM_SETCHECK,s.enabled?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(InvertXBox,BM_SETCHECK,s.invertX?BST_CHECKED:BST_UNCHECKED,0);
@@ -186,6 +188,9 @@ static bool ApplyDialog(bool saveNow=false){
     for(int i=0;i<5;++i)if(!Integer(Keys[i],next.keys[i],true))return false;
     float* numbers[]={&next.deadzone,&next.speed,&next.pitchLimit,&next.returnDelay,&next.returnSpeed};
     for(int i=0;i<5;++i){auto text=Text(Tuning[i]);wchar_t* end=nullptr;*numbers[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
+    next.mouseEnabled=SendMessageW(MouseBox,BM_GETCHECK,0,0)==BST_CHECKED;
+    HWND mouseBoxes[]={MouseSpeedBox,MouseZoomBox};float* mouseValues[]={&next.mouseSensitivity,&next.mouseZoomStep};
+    for(int i=0;i<2;++i){auto text=Text(mouseBoxes[i]);wchar_t* end=nullptr;*mouseValues[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
     if(!Valid(next))return false;
     std::unique_lock<std::mutex> lock(ControlMutex);
     if(ScreenGeneration!=DialogGeneration||(!Screen&&!DialogLive)||CurrentName()!=DialogProfile)return false;
@@ -230,7 +235,9 @@ static void OpenDialog(){
     const wchar_t* tuningNames[]={L"Deadzone (0..0.95)",L"Degrees/sec (1..720)",L"Pitch limit (0..80)",L"Return delay (-1..60)",L"Return speed (1..720)"};
     for(int i=0;i<5;++i){int y=85+i*38;Child(L"STATIC",keyNames[i],0,420,y,200,24);Keys[i]=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,640,y-3,140,25);
         int ty=285+i*33;Child(L"STATIC",tuningNames[i],0,16,ty,220,24);Tuning[i]=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,250,ty-3,140,25);}
-    Child(L"STATIC",L"Keys: A..Z or Windows VK number/hex. 0 = unbound.\nArrows: left 0x25, up 0x26, right 0x27, down 0x28.\nPad reset: right thumb 128, left thumb 64, Back 32.\nBindings may overlap driving actions: choose unused inputs.",0,420,285,360,95);
+    MouseBox=Child(L"BUTTON",L"Enable mouse drag and wheel zoom",BS_AUTOCHECKBOX,420,280,360,25);
+    Child(L"STATIC",L"Mouse sensitivity (0.01..10)",0,420,315,230,25);MouseSpeedBox=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,660,312,120,25);
+    Child(L"STATIC",L"Zoom step (0.01..1)",0,420,350,230,25);MouseZoomBox=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,660,347,120,25);
     Child(L"STATIC",L"Stick mode",0,420,405,120,25);
     ModeBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,540,402,240,130);
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Rate orbit (UG2 style)"));

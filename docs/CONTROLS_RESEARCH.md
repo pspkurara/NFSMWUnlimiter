@@ -65,3 +65,25 @@ controller button assignments or overwrite the native action dispatch.
 the PC setter's grouping also treats 2..6 as the external group. A MOD's added
 cockpit replacement is not automatically identifiable from that naming alone.
 Fixed-eye selection therefore has an explicit POV bitmask override.
+
+## Native mouse input evidence
+
+Global mouse object `0x987F50` updates in the frame loop via `0x6E7667` to
+`0x6C9C80`. That calls cursor update `0x6C9B60`, computes normalized position
+deltas at object +0x14/+0x18, copies wheel from `0x628D00` to +0x1C, and stores
+left/right button states at +0x20/+0x23. Native frame counter `0x982B78` increments
+at `0x6E7662`, immediately before that update. DirectInput mouse data +8 is copied
+to the wheel value at `0x634A20`; the input reset clears it at `0x63F892`.
+The camera reads the completed buffer on the following camera update, not a new
+OS event queue.
+
+Native garage HandleMouse `0x7A2010` reads the same delta, wheel and left-button
+fields. Its call at `0x7BA179` precedes garage update `0x7BA185`, which dispatches
+HandleJoyEvents at `0x7B9F23`. Consequently an unconditional zero stick speed in
+the joy hook overwrites native mouse rotation. Preserving mouse speeds requires
+both an idle stick and the native mouse permission flags, not just a held button.
+
+Native pause wrapper `0x468390` tail-calls GameFlowManager::IsPaused `0x64B680`.
+Its exact instruction signature is required alongside the native mouse layout;
+added orbit ignores input during native pause. Countdown and scripted camera
+context support remains a separate, unverified task.

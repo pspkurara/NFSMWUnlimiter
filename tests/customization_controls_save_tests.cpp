@@ -47,7 +47,15 @@ int main() {try {
         file.write(reinterpret_cast<const char*>(&legacyHeader),sizeof(legacyHeader));
         file.write(reinterpret_cast<const char*>(&legacy),C::LegacyStateBytes);}
     auto migrated=C::LoadState("Alpha");
-    Require(migrated.version==2&&migrated.keys[0]=='J'&&migrated.orbitMode==0,"version-1 disk settings migrate to rate mode");
+    Require(migrated.version==3&&migrated.keys[0]=='J'&&migrated.orbitMode==0,"version-1 disk settings migrate to rate mode");
+    legacy=loaded;legacy.version=2;legacy.orbitMode=1;
+    legacyHeader.size=C::Version2StateBytes;legacyHeader.crc=S::Crc(&legacy,C::Version2StateBytes);
+    {std::ofstream file(target,std::ios::binary|std::ios::trunc);
+        file.write(reinterpret_cast<const char*>(&legacyHeader),sizeof(legacyHeader));
+        file.write(reinterpret_cast<const char*>(&legacy),C::Version2StateBytes);}
+    migrated=C::LoadState("Alpha");
+    Require(migrated.version==3&&migrated.orbitMode==1&&migrated.mouseEnabled==1,"version-2 disk settings preserve mode and initialize mouse defaults");
+
     C::OnBeginLoad();C::OnEndLoad("Beta",nullptr,true,true,true,0);
     Require(C::Runtime().keys[0]=='K',"profile creation without input reader preserves active configuration");
     C::ReadInput=true;auto generation=C::ScreenGeneration;

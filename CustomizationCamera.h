@@ -8,6 +8,7 @@
 #include "includes\injector\injector.hpp"
 #include "CustomizationControls.h"
 #include "CustomizationOrbitMath.h"
+#include "CustomizationMouseOrbit.h"
 
 // Optional, independently guarded hooks for the PC 1.3 executable. No preview
 // state is written to RideInfo, the profile, or a game save.
@@ -16,6 +17,7 @@ namespace CustomizationCamera
     struct Options
     {
         bool garage = true;
+        bool partsOnly = false;
         bool driverPreview = true;
         bool resetOnLookBack = true;
         bool resetOnViewChange = true;
@@ -35,6 +37,7 @@ namespace CustomizationCamera
     static bool Installed = false;
     static bool NativeLookBackVerified = false;
     static bool NativeViewVerified = false;
+    static bool NativeMouseVerified = false;
     static DWORD(__stdcall* GetPadState)(DWORD, XINPUT_STATE*) = nullptr;
 
     // A separate ASI may supply normalized, already mapped stick input through
@@ -197,11 +200,14 @@ namespace CustomizationCamera
         DriverPreviewActive = Config.driverPreview && PartsScreen && garage[0x88 / 4] == 0x308;
         float x = 0, y = 0;
         bool reset = false;
-        bool control = Config.garage && PartsScreen && PartsScreen[0x148 / 4] != 0x307 &&
-                       GarageMover(garage) && ReadStick(x, y, reset);
+        const bool nativePermission=*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134);
+        const bool nativeMouse=NativeMouseVerified&&nativePermission&&*reinterpret_cast<const BYTE*>(0x987F70);
+        const bool screenAllows=PartsScreen?PartsScreen[0x148/4]!=0x307:
+            !Config.partsOnly&&(*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134));
+        bool control = Config.garage && screenAllows && GarageMover(garage) && ReadStick(x, y, reset);
         if (!control)
         {
-            if (GarageControlled) SetGarageSpeeds(garage, 0, 0);
+            if (GarageControlled && !nativeMouse) SetGarageSpeeds(garage, 0, 0);
             GarageControlled = false;
             reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);
             return;
@@ -216,6 +222,9 @@ namespace CustomizationCamera
         reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);
         userRotate = savedRotate;
         showcase = savedShowcase;
+        // Native mouse handling runs before this joy call and already set speeds.
+        // An idle connected pad must not replace those speeds with zero.
+        if(nativeMouse&&x==0&&y==0){GarageControlled=false;return;}
         SetGarageSpeeds(garage, x, y);
         GarageControlled = true;
     }
@@ -246,6 +255,18 @@ namespace CustomizationCamera
     static bool WaitForNeutral = false;
     struct ViewStamp { uintptr_t anchor=0; int desired=0,current=0; BYTE lag=0; };
     static ViewStamp LastView;
+    static CustomizationControls::MouseOrbit Mouse;
+    static CustomizationControls::MouseSample MouseInput() {
+        CustomizationControls::MouseSample sample;
+        if(NativeMouseVerified) {
+            sample.frame=*reinterpret_cast<const uint32_t*>(0x982B78);
+            sample.held=*reinterpret_cast<const BYTE*>(0x987F70)!=0;
+            sample.dx=*reinterpret_cast<const int*>(0x987F64);
+            sample.dy=*reinterpret_cast<const int*>(0x987F68);
+            sample.wheel=*reinterpret_cast<const int*>(0x987F6C);
+        }
+        return sample;
+    }
     static bool SameView(const ViewStamp& a,const ViewStamp& b) {
         return a.anchor==b.anchor&&a.desired==b.desired&&a.current==b.current&&a.lag==b.lag;
     }
@@ -266,14 +287,16 @@ namespace CustomizationCamera
         const auto controls = CustomizationControls::Runtime();
         static CustomizationControls::State lastControls;
         if(!CustomizationControls::Equal(lastControls,controls)) {
-            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;
+            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;Mouse.Reset();
         }
         if (!controls.enabled || *reinterpret_cast<int*>(0x925E90) != 6 || !mainView ||
+            (NativeMouseVerified && reinterpret_cast<bool(__cdecl*)()>(0x468390)()) ||
             !CustomizationControls::ReadOrbit(controls, x, y, reset))
         {
             Yaw = Pitch = 0;
             LastOrbitTick = 0;
             WaitForNeutral = false;
+            Mouse.Reset();
             original(matrix, eye, look, up);
             return;
         }
@@ -289,6 +312,13 @@ namespace CustomizationCamera
         const bool viewChanged=LastOrbitTick&&
             (LastMover!=mover||(NativeViewVerified&&!SameView(view,LastView)));
         LastView=view;
+        const bool nativeBack=NativeLookBackVerified&&*(static_cast<const BYTE*>(mover)+0xA1);
+        const bool takeover=reset||x!=0||y!=0||nativeBack||viewChanged;
+        const auto mouseSample=MouseInput();
+        // Context/mover gaps discard old cursor deltas and a retained mouse pose.
+        if(LastMover!=mover||!LastOrbitTick||now-LastOrbitTick>250)Mouse.Reset();
+        const bool mouseActivity=NativeMouseVerified&&Mouse.Update(mouseSample,controls,takeover,Yaw,Pitch);
+
         if(!directionMode&&Config.resetOnViewChange&&viewChanged)WaitForNeutral=true;
         if(WaitForNeutral&&!directionMode) {
             Yaw=Pitch=0;LastMover=mover;LastOrbitTick=LastOrbitInput=now;
@@ -298,7 +328,7 @@ namespace CustomizationCamera
         // Read the action after native key mapping, not a fixed controller button.
         // While held, stock look-back owns the view even if the orbit stick moves.
         if (!directionMode && Config.resetOnLookBack && NativeLookBackVerified &&
-            *reinterpret_cast<const BYTE*>(static_cast<const BYTE*>(mover) + 0xA1))
+            nativeBack)
         {
             Yaw = Pitch = 0;
             LastMover = mover;
@@ -315,17 +345,18 @@ namespace CustomizationCamera
         float dt = LastOrbitTick ? Clamp(float(now - LastOrbitTick) * 0.001f, 0, 0.1f) : 0;
         LastOrbitTick = now;
         if (reset) Yaw = Pitch = 0;
-        else if (directionMode || x != 0 || y != 0)
+        else if (!Mouse.owns && (directionMode || x != 0 || y != 0))
         {
             CustomizationControls::ApplyAxes(controls,x,y,dt,Yaw,Pitch);
             LastOrbitInput = now;
         }
-        else if (controls.returnDelay >= 0 && now - LastOrbitInput >= ULONGLONG(controls.returnDelay * 1000))
+        else if (!Mouse.owns && controls.returnDelay >= 0 && now - LastOrbitInput >= ULONGLONG(controls.returnDelay * 1000))
         {
             Yaw = ApproachZero(Yaw, controls.returnSpeed * dt);
             Pitch = ApproachZero(Pitch, controls.returnSpeed * dt);
         }
-        if (Yaw == 0 && Pitch == 0)
+        if(mouseActivity)LastOrbitInput=now;
+        if (Yaw == 0 && Pitch == 0 && Mouse.zoom == 1)
         {
             original(matrix, eye, look, up);
             return;
@@ -335,7 +366,7 @@ namespace CustomizationCamera
              (view.current>=0&&view.current<32&&(Config.fixedEyePovMask&(1u<<view.current))));
         const CustomizationOrbit::Pose native={{eye->x,eye->y,eye->z},{look->x,look->y,look->z}};
         CustomizationOrbit::Pose rotated;
-        if(!CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated)) {
+        if(!CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated,Mouse.zoom)) {
             original(matrix,eye,look,up);return;
         }
         const Vec orbitEye={rotated.eye.x,rotated.eye.y,rotated.eye.z,0};
@@ -365,6 +396,7 @@ namespace CustomizationCamera
         Installed = true;
         Settings settings;
         Config.garage = settings.ReadInteger("Garage", "Enabled", 1) != 0;
+        Config.partsOnly = settings.ReadInteger("Garage", "PartsOnly", 0) != 0;
         Config.driverPreview = settings.ReadInteger("Garage", "PreviewDriver", 1) != 0;
         Config.resetOnLookBack = settings.ReadInteger("RaceOrbit", "ResetOnLookBack", 1) != 0;
         Config.resetOnViewChange = settings.ReadInteger("RaceOrbit", "ResetOnViewChange", 1) != 0;
@@ -380,6 +412,16 @@ namespace CustomizationCamera
         HMODULE xinput = LoadLibraryExA("xinput1_4.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (!xinput) xinput = LoadLibraryExA("xinput9_1_0.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (xinput) GetPadState = reinterpret_cast<decltype(GetPadState)>(GetProcAddress(xinput, "XInputGetState"));
+
+        const unsigned char mouseDelta[]={0x89,0x4E,0x14,0x89,0x56,0x18};
+        const unsigned char mouseHeld[]={0xA0,0x70,0x7F,0x98,0};
+        const unsigned char mouseWheel[]={0xDB,0x05,0x6C,0x7F,0x98,0};
+        const unsigned char mouseUpdate[]={0xB9,0x50,0x7F,0x98,0};
+        const unsigned char mouseFrame[]={0xA3,0x78,0x2B,0x98,0};
+        const unsigned char pauseCheck[]={0xB9,0x70,0x5E,0x92,0,0xE9,0xE6,0x32,0x1E,0};
+        NativeMouseVerified=Matches(0x468390,pauseCheck)&&Matches(0x6C9C6D,mouseDelta)&&Matches(0x7A2052,mouseHeld)&&
+            Matches(0x515990,mouseWheel)&&Matches(0x6E7651,mouseUpdate)&&Matches(0x6E7662,mouseFrame);
+        if(!NativeMouseVerified)Report("Native mouse layout not verified; added mouse orbit disabled.");
 
         const unsigned char ctorSetup[] = {0xE8, 0xAB, 0xCE, 0xFF, 0xFF};
         bool lifecycle = Matches(0x7C01B0, ctorSetup) && PointerMatches(0x8B7EA4, 0x7C01D0) &&

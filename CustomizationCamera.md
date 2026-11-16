@@ -25,8 +25,9 @@ RotationSpeed = 1.0
 
 ```
 
-The garage camera uses the chosen XInput stick while a parts selection screen is
-alive, excluding custom gauges. The default right stick therefore no longer
+The garage camera uses the chosen XInput stick in parts selection (excluding
+custom gauges) and, with `[Garage] PartsOnly=0` (default), other garage screens
+where native rotation is permitted. Set PartsOnly=1 to limit the remap to parts. The default right stick therefore no longer
 shares native camera rotation with the left stick's part navigation. The original
 game still drains its event queues. Its native camera permission flags are scoped
 to that synchronous call and immediately restored. Mouse/keyboard-only operation
@@ -131,3 +132,9 @@ selects these two bits. A cockpit MOD replacing another POV can select its bit;
 a generic cockpit marker is not inferred from car meshes. If the native POV
 layout signatures do not match, automatic POV handling is disabled. These paths
 and combinations still require game-level visual confirmation.
+
+The native garage mouse handler runs before HandleJoyEvents. With the remap
+active, an idle stick preserves the rotation speeds already set by native mouse
+dragging; actual stick movement takes priority. The mouse handler's permission
+flags remain authoritative, and its existing wheel zoom path is retained.
+Added driving mouse controls are described in [controls](CustomizationControls.md).

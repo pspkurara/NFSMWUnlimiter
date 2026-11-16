@@ -78,8 +78,35 @@ centers on native look-back or POV/anchor/lag changes by default. A view change
 waits for neutral input before another rate orbit so a held stick does not undo
 that change immediately.
 
-State version 2 appends the mode to the 72-byte version-1 prefix. Loading a legacy
-sidecar verifies its original length, CRC and native revision before migrating
-to Rate mode, retaining its bindings and tuning. Unknown payload versions and
-sizes are rejected. The next successful save writes the new 76-byte payload;
-this does not alter native save bytes.
+The current state version 3 appends mouse settings to the version-2 mode field
+and the 72-byte version-1 prefix. Loading either legacy size verifies its original
+length, CRC and native revision before migration. Version 1 retains Rate mode;
+version 2 retains its chosen mode. Existing bindings and tuning are preserved,
+with defaults for new mouse fields. Unknown payload versions and sizes are
+rejected. The next successful save writes the current 88-byte payload without
+altering native save bytes.
+
+## Mouse orbit
+
+The F7 dialog includes a mouse enable switch, sensitivity and zoom step. With
+orbit enabled, hold the native left mouse button and move to rotate. Scroll
+zooms external camera distance in the range 0.25x..4x of its native distance.
+The native mouse buffer is read once per game input frame and is never cleared,
+modified or consumed from other users. No replacement Raw Input registration or
+window subclass is installed. Delta units use the game's normalized cursor
+coordinates; wheel steps use its DirectInput 120-unit notch convention.
+
+Mouse retains its view after release. Any active camera stick/key/reset input,
+native look-back, or POV/basis change returns ownership and zoom to the native
+camera/selected stick mode. If the mouse button was held, release and drag anew
+before reclaiming control. Controller takeover wins when both inputs occur in
+the same frame. Idle or absent controllers do not block mouse-only operation.
+Focus loss, native pause, settings changes, disconnect and context gaps discard
+runtime camera ownership. Cursor motion without a drag does not rotate the view.
+
+This deliberately reuses the native cursor path, so movement stops at the native
+cursor bounds; unlimited captured/recentered dragging is not implemented.
+First-person eye position stays fixed and wheel distance zoom has no visual
+effect there; changing first-person FOV needs a separate verified integration.
+Mouse rotation and zoom share the existing post-collision orbit limitation and
+still need in-game validation, including menus, pause, controllers and remappers.
