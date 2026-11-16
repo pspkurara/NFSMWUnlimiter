@@ -1,0 +1,380 @@
+#pragma once
+#include <windows.h>
+#include <bcrypt.h>
+#include <MinHook.h>
+#include <array>
+#include <vector>
+#include <map>
+#include <mutex>
+#include <string>
+#include <filesystem>
+#include <fstream>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <cstdint>
+#include <tuple>
+#pragma comment(lib, "bcrypt.lib")
+
+// Profile-adjacent extension data. The native save is opened for reading only.
+// Host owns pending transactions; the independent ASI owns just its editor UI.
+namespace CustomizationSave {
+static uintptr_t GlobalAddress(uintptr_t address) {
+#ifdef MWCL_SAVE_TEST_ADDRESS
+    return MWCL_SAVE_TEST_ADDRESS(address);
+#else
+    return address;
+#endif
+}
+struct Values { uint32_t size = sizeof(Values), mask = 0; float values[12]{}; };
+static_assert(sizeof(Values) == 56, "Owned editor ABI 1");
+struct Key {
+    uint32_t handle{}, frontend{}, vehicle{};
+    uint8_t customization{}, career{};
+    uint16_t reserved{};
+    bool operator<(const Key& other) const {
+        return std::tie(handle,frontend,vehicle,customization,career) <
+               std::tie(other.handle,other.frontend,other.vehicle,other.customization,other.career);
+    }
+    bool operator==(const Key& other) const { return !(*this<other)&&!(other<*this); }
+};
+static_assert(sizeof(Key) == 16, "Sidecar key schema 1");
+struct Record { Key key; Values value; };
+struct Header {
+    char magic[8] = {'M','W','C','L','S','V','1',0};
+    uint32_t version = 1, recordSize = sizeof(Record), count = 0, crc = 0;
+    uint8_t nativeDigest[32]{};
+};
+static_assert(sizeof(Header)==56 && sizeof(Record)==72, "Sidecar schema 1");
+struct Binding { Key key; uint64_t fingerprint{}; };
+using State = std::map<Key, Values>;
+static std::mutex Mutex;
+static State Pending, Preview, Saving;
+static std::map<const DWORD*,Binding> Rides;
+static std::map<Key,uint64_t> Tokens;
+static uint64_t NextToken = 1;
+static uint64_t ActiveEditorToken = 0;
+static std::string Profile, SavingProfile;
+static bool HooksReady = false, SaveCaptured = false;
+static void(__cdecl* RegisterEditor)(int(__cdecl*)(uint64_t,const Values*,int)) = nullptr;
+static void(__cdecl* SetOwnedContext)(uint64_t,const Values*) = nullptr;
+
+static void Log(const char* message) { OutputDebugStringA("[MWCL Save] "); OutputDebugStringA(message); OutputDebugStringA("\n"); }
+static bool ValidName(const std::string& name) {
+    return !name.empty() && name.size()<32 && name!="." && name!=".." &&
+        name.find_first_of("\\/:*?\"<>|")==std::string::npos &&
+        std::all_of(name.begin(),name.end(),[](unsigned char c){return c>=32;});
+}
+static std::string Name(const char* text) {
+    if(!text) return {};
+    size_t count=strnlen_s(text,32);
+    return count<32 ? std::string(text,count) : std::string();
+}
+static std::filesystem::path ProfileDirectory(const std::string& name) {
+    if(!ValidName(name)) return {};
+    // Use the game's IAT, preserving save-directory redirection by other mods.
+    using FolderFn=HRESULT(WINAPI*)(HWND,int,HANDLE,DWORD,LPSTR);
+    auto folder=*reinterpret_cast<FolderFn*>(GlobalAddress(0x8902EC));
+    char documents[MAX_PATH]{};
+    if(!folder || FAILED(folder(nullptr,0x8005,nullptr,0,documents))) return {};
+    const char* title=*reinterpret_cast<const char**>(GlobalAddress(0x901748));
+    std::string directory=Name(title);
+    if(!ValidName(directory)) return {};
+    return std::filesystem::path(documents)/directory/name;
+}
+static uint32_t Crc(const void* data,size_t size) {
+    uint32_t crc=0xFFFFFFFFu;
+    auto bytes=static_cast<const unsigned char*>(data);
+    for(size_t n=0;n<size;++n) {
+        crc^=bytes[n];
+        for(int bit=0;bit<8;++bit) crc=(crc>>1)^((0u-(crc&1))&0xEDB88320u);
+    }
+    return ~crc;
+}
+static bool Digest(const std::filesystem::path& file,std::array<uint8_t,32>& result) {
+    std::ifstream stream(file,std::ios::binary);
+    if(!stream) return false;
+    BCRYPT_ALG_HANDLE algorithm=nullptr;
+    BCRYPT_HASH_HANDLE hash=nullptr;
+    if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0) return false;
+    bool ok=BCryptCreateHash(algorithm,&hash,nullptr,0,nullptr,0,0)>=0;
+    unsigned char buffer[4096]; size_t total=0;
+    while(ok && stream) {
+        stream.read(reinterpret_cast<char*>(buffer),sizeof(buffer));
+        auto bytes=stream.gcount(); total+=size_t(bytes);
+        if(total>16*1024*1024) {ok=false;break;}
+        if(bytes && BCryptHashData(hash,buffer,ULONG(bytes),0)<0) ok=false;
+    }
+    ok=ok && stream.eof() && total>0 && BCryptFinishHash(hash,result.data(),ULONG(result.size()),0)>=0;
+    if(hash) BCryptDestroyHash(hash);
+    BCryptCloseAlgorithmProvider(algorithm,0);
+    return ok;
+}
+static bool ValidValues(const Values& value) {
+    if(value.size!=sizeof(Values) || (value.mask&~0xFFFu)) return false;
+    for(unsigned i=0;i<12;++i) if((value.mask>>i)&1) {
+        float v=value.values[i]; if(!std::isfinite(v)) return false;
+        switch(i/2) {
+        case 0: if(std::fabs(v)>2) return false; break;
+        case 1: if(v<0||v>5) return false; break;
+        case 2: if(std::fabs(v)>45) return false; break;
+        case 3: case 4: if(v<.005f||v>5) return false; break;
+        case 5: if(std::fabs(v)>2) return false; break;
+        }
+    }
+    return true;
+}
+static DWORD* CurrentProfile() {
+    auto database=*reinterpret_cast<DWORD**>(GlobalAddress(0x91CF90));
+    return database ? reinterpret_cast<DWORD*>(database[4]) : nullptr;
+}
+static DWORD* Stable() {
+    auto profile=CurrentProfile();
+    return profile ? reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(profile)+0x414) : nullptr;
+}
+static bool ReadKey(const DWORD* record,Key& key) {
+    if(!record || record[0]==0xFFFFFFFFu || !(record[3]&6)) return false;
+    auto bytes=reinterpret_cast<const BYTE*>(record);
+    if(bytes[16]==0xFF) return false;
+    key={record[0],record[1],record[2],bytes[16],bytes[17],0};
+    return true;
+}
+static bool CurrentKey(const Key& key) {
+    auto stable=Stable(); if(!stable) return false;
+    for(int i=0;i<200;++i) {Key present; if(ReadKey(stable+i*5,present)&&present==key) return true;}
+    return false;
+}
+static void LoadLocked(const std::string& name) {
+    Profile=name; Pending.clear();Preview.clear();Rides.clear();Tokens.clear();ActiveEditorToken=0;
+    Saving.clear();SaveCaptured=false;SavingProfile.clear();
+    try {
+        auto directory=ProfileDirectory(name); if(directory.empty()) return;
+        std::ifstream stream(directory/L"NFSMWCustomizationLab.bin",std::ios::binary);
+        if(!stream) return;
+        Header h; stream.read(reinterpret_cast<char*>(&h),sizeof(h));
+        if(!stream || std::memcmp(h.magic,"MWCLSV1",8) || h.version!=1 ||
+           h.recordSize!=sizeof(Record) || h.count>200) {Log("Sidecar schema invalid; ignored.");return;}
+        std::vector<Record> records(h.count);
+        stream.read(reinterpret_cast<char*>(records.data()),std::streamsize(records.size()*sizeof(Record)));
+        if(!stream || stream.peek()!=EOF || Crc(records.data(),records.size()*sizeof(Record))!=h.crc) {
+            Log("Sidecar length/CRC invalid; ignored.");return;
+        }
+        std::array<uint8_t,32> digest{};
+        if(!Digest(directory/name,digest)||std::memcmp(digest.data(),h.nativeDigest,32)) {
+            Log("Sidecar belongs to a different native save revision; ignored.");return;
+        }
+        for(const auto& record:records) {
+            if(!ValidValues(record.value) || !CurrentKey(record.key) || Pending.count(record.key)) {
+                Pending.clear();Log("Sidecar owned-car identity/value invalid; ignored.");return;
+            }
+            Pending.emplace(record.key,record.value);
+        }
+        Log("Owned-car sidecar loaded after native profile success.");
+    } catch(...) {Pending.clear();Log("Sidecar read failed; native profile unchanged.");}
+}
+static void EnsureProfileLocked() {
+    auto native=CurrentProfile();
+    if(!native || !reinterpret_cast<BYTE*>(native)[32]) {
+        if(!Profile.empty()) LoadLocked("");
+        return;
+    }
+    std::string name=Name(reinterpret_cast<const char*>(native));
+    if(ValidName(name)&&name!=Profile) LoadLocked(name);
+}
+static uint64_t Fingerprint(const DWORD* ride) {
+    uint64_t hash=14695981039346656037ull;
+    auto add=[&](uint32_t v){hash^=v;hash*=1099511628211ull;};
+    add(ride[0]);
+    // Native PC RideInfo parts table: +0x48, 139 entries (verified in WriteRecordIntoRide).
+    auto parts=reinterpret_cast<DWORD* const*>(reinterpret_cast<const BYTE*>(ride)+0x48);
+    for(int slot=0;slot<139;++slot) add(parts[slot]?parts[slot][0]:0);
+    return hash;
+}
+static bool IdentityLocked(DWORD* ride,Key& key,bool editor) {
+    if(!ride) return false;
+    if(*reinterpret_cast<int*>(GlobalAddress(0x925E90))==3) {
+        auto record=*reinterpret_cast<DWORD**>(GlobalAddress(0x9B9EC4));
+        auto stable=Stable();
+        uintptr_t at=reinterpret_cast<uintptr_t>(record), first=reinterpret_cast<uintptr_t>(stable);
+        if(stable && at>=first && at<first+200*20 && (at-first)%20==0 && ReadKey(record,key) &&
+           reinterpret_cast<int(__thiscall*)(const DWORD*)>(0x5816B0)(record)==int(ride[0])) return true;
+        if(editor) return false;
+    }
+    uint64_t fingerprint=Fingerprint(ride);
+    auto found=Rides.find(ride);
+    if(found!=Rides.end() && found->second.fingerprint==fingerprint && CurrentKey(found->second.key)) {
+        key=found->second.key;return true;
+    }
+    // An AI can have identical equipment. Content equality cannot prove ownership.
+    // Unknown RideInfo copies remain native until their copy lineage is verified.
+    return false;
+}
+static int __cdecl Edit(uint64_t token,const Values* values,int action) {
+    std::lock_guard<std::mutex> lock(Mutex);
+    EnsureProfileLocked();
+    auto owner=std::find_if(Tokens.begin(),Tokens.end(),[&](const auto& entry){return entry.second==token;});
+    if(!HooksReady || owner==Tokens.end() || !CurrentKey(owner->first)) return 0;
+    if(action==2) {Preview.erase(owner->first);return 1;}
+    if(token!=ActiveEditorToken) return 0;
+    if((action!=0 && action!=1)||!values||!ValidValues(*values)) return 0;
+    if(action==0) Preview[owner->first]=*values;
+    else {
+        if(values->mask) Pending[owner->first]=*values; else Pending.erase(owner->first);
+        Preview.erase(owner->first);
+    }
+    return 1;
+}
+static void EditorContext(DWORD* ride) {
+    if(!HooksReady) return;
+    if(!SetOwnedContext) {
+        HMODULE core=GetModuleHandleA("NFSMWCustomizationLab.asi"); if(!core) return;
+        RegisterEditor=reinterpret_cast<decltype(RegisterEditor)>(GetProcAddress(core,"MWCL_RegisterOwnedEditorV1"));
+        SetOwnedContext=reinterpret_cast<decltype(SetOwnedContext)>(GetProcAddress(core,"MWCL_SetOwnedContextV1"));
+        if(!RegisterEditor||!SetOwnedContext) {RegisterEditor=nullptr;SetOwnedContext=nullptr;return;}
+        RegisterEditor(&Edit);
+    }
+    uint64_t token=0; Values values;
+    {
+        std::lock_guard<std::mutex> lock(Mutex);
+        EnsureProfileLocked(); Key key;
+        if(IdentityLocked(ride,key,true)) {
+            auto inserted=Tokens.emplace(key,0);
+            if(inserted.first->second==0) inserted.first->second=NextToken++;
+            token=inserted.first->second;
+            auto found=Pending.find(key);if(found!=Pending.end()) values=found->second;
+        }
+        if(token!=ActiveEditorToken) Preview.clear();
+        ActiveEditorToken=token;
+    }
+    // The core may call Edit from its UI thread. Never call it while holding Mutex.
+    SetOwnedContext(token,token?&values:nullptr);
+}
+static float Resolve(DWORD* ride,int axle,int channel,float fallback) {
+    if(!HooksReady||axle<0||axle>1||channel<0||channel>5) return fallback;
+    std::lock_guard<std::mutex> lock(Mutex);
+    EnsureProfileLocked(); Key key;
+    if(!IdentityLocked(ride,key,false)) return fallback;
+    const Values* value=nullptr;
+    auto preview=Preview.find(key);if(preview!=Preview.end()) value=&preview->second;
+    else {auto pending=Pending.find(key);if(pending!=Pending.end()) value=&pending->second;}
+    unsigned bit=unsigned(channel*2+axle);
+    return value && (value->mask&(1u<<bit)) ? value->values[bit] : fallback;
+}
+static void Commit(const std::string& name) {
+    State snapshot;
+    {
+        std::lock_guard<std::mutex> lock(Mutex);
+        if(!SaveCaptured||name!=SavingProfile||name!=Profile) return;
+        snapshot=Saving;SaveCaptured=false;
+    }
+    try {
+        auto directory=ProfileDirectory(name); if(directory.empty()) return;
+        Header header; std::array<uint8_t,32> hash{};
+        if(!Digest(directory/name,hash)) {Log("Native save cannot be hashed; sidecar not committed.");return;}
+        std::memcpy(header.nativeDigest,hash.data(),hash.size());
+        std::vector<Record> records;
+        for(const auto& entry:snapshot) if(CurrentKey(entry.first)) records.push_back({entry.first,entry.second});
+        header.count=uint32_t(records.size());header.crc=Crc(records.data(),records.size()*sizeof(Record));
+        auto target=directory/L"NFSMWCustomizationLab.bin",temp=directory/L"NFSMWCustomizationLab.bin.tmp";
+        HANDLE file=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file==INVALID_HANDLE_VALUE) {Log("Cannot create sidecar temporary file.");return;}
+        DWORD written=0;
+        bool ok=WriteFile(file,&header,sizeof(header),&written,nullptr)&&written==sizeof(header);
+        if(ok&&!records.empty()) ok=WriteFile(file,records.data(),DWORD(records.size()*sizeof(Record)),&written,nullptr)&&written==records.size()*sizeof(Record);
+        if(ok) ok=FlushFileBuffers(file)!=FALSE;
+        CloseHandle(file);
+        if(ok) {
+            auto backup=directory/L"NFSMWCustomizationLab.bin.bak";
+            if(std::filesystem::exists(target)) CopyFileW(target.c_str(),backup.c_str(),FALSE);
+            ok=MoveFileExW(temp.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE;
+        }
+        if(!ok) {DeleteFileW(temp.c_str());Log("Atomic sidecar commit failed; previous file retained.");}
+        else Log("Owned-car sidecar committed after successful native SaveDone.");
+    } catch(...) {Log("Sidecar commit failed; native save untouched.");}
+}
+
+using SaveFn=void(__thiscall*)(DWORD*,void*,int);
+using DoneFn=void(__thiscall*)(DWORD*,const char*);
+using LoadFn=bool(__thiscall*)(DWORD*,void*,int,bool,int);
+using BuildFn=void(__thiscall*)(DWORD*,uint32_t,int,DWORD*);
+using NewFn=DWORD*(__thiscall*)(DWORD*);
+static SaveFn OriginalSave=nullptr;static DoneFn OriginalDone=nullptr;
+static LoadFn OriginalLoad=nullptr;static BuildFn OriginalBuild=nullptr;static NewFn OriginalNew=nullptr;
+struct Backup {std::string profile;State pending;};
+static std::map<void*,Backup> Backups;
+static void* NativeSaveBuffer() {
+    auto memoryCard=*reinterpret_cast<DWORD**>(GlobalAddress(0x91CB20));
+    return memoryCard?reinterpret_cast<void*>(memoryCard[0x44/4]):nullptr;
+}
+static void __fastcall Save(DWORD* profile,void*,void* buffer,int size) {
+    OriginalSave(profile,buffer,size);
+    if(profile!=CurrentProfile()) return;
+    std::lock_guard<std::mutex> lock(Mutex);
+    EnsureProfileLocked();
+    if(buffer==NativeSaveBuffer()) {Saving=Pending;SavingProfile=Profile;SaveCaptured=true;}
+    else {if(Backups.size()>8) Backups.clear();Backups[buffer]={Profile,Pending};}
+}
+static void __fastcall Done(DWORD* callback,void*,const char* profile) {
+    std::string name=Name(profile);
+    OriginalDone(callback,profile);
+    if(ValidName(name)) Commit(name);
+}
+static bool __fastcall Load(DWORD* profile,void*,void* buffer,int size,bool commit,int player) {
+    bool result=OriginalLoad(profile,buffer,size,commit,player);
+    if(result&&commit&&player==0&&profile==CurrentProfile()) {
+        std::lock_guard<std::mutex> lock(Mutex);
+        std::string name=Name(reinterpret_cast<const char*>(profile));
+        auto backup=Backups.find(buffer);
+        if(buffer!=NativeSaveBuffer()&&backup!=Backups.end()&&backup->second.profile==name) {
+            Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();
+        } else {LoadLocked(name);Backups.clear();}
+    }
+    return result;
+}
+static void __fastcall Build(DWORD* stable,void*,uint32_t handle,int player,DWORD* ride) {
+    OriginalBuild(stable,handle,player,ride);
+    if(!ride||player!=0||stable!=Stable()) return;
+    Key key;
+    for(int i=0;i<200;++i) if(stable[i*5]==handle && ReadKey(stable+i*5,key)) {
+        std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+        if(Rides.size()>512) Rides.clear();Rides[ride]={key,Fingerprint(ride)};return;
+    }
+}
+static DWORD* __fastcall NewCar(DWORD* stable,void*) {
+    DWORD* record=OriginalNew(stable);
+    if(record&&stable==Stable()) {
+        std::lock_guard<std::mutex> lock(Mutex);
+        auto remove=[&](auto& table){for(auto it=table.begin();it!=table.end();) if(it->first.handle==record[0]) it=table.erase(it);else ++it;};
+        remove(Pending);remove(Preview);remove(Tokens);
+        for(auto it=Rides.begin();it!=Rides.end();) if(it->second.key.handle==record[0]) it=Rides.erase(it);else ++it;
+    }
+    return record;
+}
+static bool Install() {
+    if(HooksReady) return true;
+    struct Hook {uintptr_t address;void* replacement;void** original;std::vector<unsigned char> bytes;};
+    std::vector<Hook> hooks={
+        {0x58FD10,&Save,reinterpret_cast<void**>(&OriginalSave),{0x8B,0x54,0x24,4,0x53,0x55}},
+        {0x526AC0,&Done,reinterpret_cast<void**>(&OriginalDone),{0xE8,0xDB,0x5E,0x12,0,0x85,0xC0}},
+        {0x5ACB70,&Load,reinterpret_cast<void**>(&OriginalLoad),{0x83,0xEC,0x24,0x8B,0x44,0x24,0x28}},
+        {0x5910E0,&Build,reinterpret_cast<void**>(&OriginalBuild),{0x8B,0x54,0x24,4,0x53,0x57}},
+        {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}}
+    };
+    for(const auto& hook:hooks) if(std::memcmp(reinterpret_cast<void*>(hook.address),hook.bytes.data(),hook.bytes.size())) {
+        Log("Save extension disabled: unknown executable or competing hook.");return false;
+    }
+    MH_STATUS status=MH_Initialize();if(status!=MH_OK&&status!=MH_ERROR_ALREADY_INITIALIZED) return false;
+    size_t created=0;
+    for(auto& hook:hooks) {
+        if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.replacement,hook.original)!=MH_OK) break;
+        ++created;
+    }
+    if(created==hooks.size()) {
+        bool enabled=true;
+        for(auto& hook:hooks) if(MH_EnableHook(reinterpret_cast<void*>(hook.address))!=MH_OK) {enabled=false;break;}
+        if(enabled) {HooksReady=true;Log("Verified native save/load and owned-car hooks installed.");return true;}
+    }
+    for(size_t i=0;i<created;++i) {MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}
+    Log("Save extension disabled: hook transaction failed.");return false;
+}
+}

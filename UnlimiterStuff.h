@@ -33,10 +33,15 @@ bool ManuHook, ExtraCustomization, DisappearingWheelsFix, SecondaryLogoFix, Expa
 //#include "CarRenderConn.h"
 #include "Helpers.h"
 #include "CodeCaves.h"
+#include "CustomizationSave.h"
+#include "CustomizationBridge.h"
+#include "CustomizationCamera.h"
 
 int Init()
 {
 	CIniReader Settings("NFSMWUnlimiterSettings.ini");
+	// Optional extension; no companion means unchanged native values.
+	CustomizationBridge::Install();
 
 	// Main
 	ReplacementCar = Settings.ReadInteger("Main", "ReplacementModel", 1);
@@ -360,5 +365,7 @@ int Init()
 		//injector::MakeCALL(0x4FCF5B, FlushFromSkinCompositeCache, true);
 	}
 
+	CustomizationSave::Install();
+	CustomizationCamera::Install();
 	return 0;
 }
