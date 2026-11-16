@@ -17,5 +17,20 @@ int main() {
     near(MoveBodyPart(part,body,pitched).m[3][2],part.m[3][2]);
     auto inverse=Identity();body=Identity();body.m[0][0]=NAN;
     if(RigidInverse(body,inverse)) return 1;
+    body=Identity();body.m[3][0]=INFINITY;
+    if(RigidInverse(body,inverse)) return 1;
+    body=Identity();body.m[0][3]=.1f;
+    if(RigidInverse(body,inverse)) return 1;
+    // Attachments and animated panels retain their marker transform under rake
+    // in the exact biased root, including a translated and rotated car.
+    auto root=Identity();root.m[0][0]=0;root.m[0][1]=1;
+    root.m[1][0]=-1;root.m[1][1]=0;
+    root.m[3][0]=13;root.m[3][1]=-8;root.m[3][2]=2.03f;
+    auto marker=Identity();marker.m[3][0]=1.2f;marker.m[3][1]=.3f;marker.m[3][2]=.4f;
+    auto delta=HeightTransform(1.5f,-1.5f,-.1f,.1f);
+    auto nativePart=Multiply(marker,root);
+    auto expected=Multiply(Multiply(marker,delta),root);
+    auto actual=MoveBodyPart(nativePart,root,delta);
+    for(int i=0;i<4;++i) for(int j=0;j<4;++j) near(actual.m[i][j],expected.m[i][j]);
     return 0;
 }

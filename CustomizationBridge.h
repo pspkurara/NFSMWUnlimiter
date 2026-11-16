@@ -122,8 +122,6 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
         float scale=widthScale[axle?2:0];
         if(std::fabs(inset)<=2.f&&scale>.001f) brakeMarker[axle]+=inset/scale;
     }
-    context.bodyWorld=*body;
-    for(int j=0;j<3;++j) context.bodyWorld.m[3][j]=position[j];
     float front=Value(context,0,0,0.f),rear=Value(context,1,0,0.f);
     if(std::fabs(front)<=2.f&&std::fabs(rear)<=2.f&&car[1517]) {
         auto attributes=reinterpret_cast<const float*>(car[1517]);
@@ -139,23 +137,33 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
 }
 using RenderPartFn=void(__thiscall*)(DWORD*,void*,void*,Matrix*,void*,unsigned);
 auto originalPart=reinterpret_cast<RenderPartFn>(0x7387e0);
+using CopyMatrixFn=Matrix*(__thiscall*)(Matrix*,const Matrix*);
+Matrix* __fastcall CaptureBodyRoot(Matrix* destination,void*,const Matrix* source) {
+    // 0x74E91D copies biased_local_world before per-part damage/door animation.
+    // A BASE/BODY draw can instead contain the damage actor's GetPartMatrix.
+    Matrix* result=reinterpret_cast<CopyMatrixFn>(0x445090)(destination,source);
+    if(current&&!current->rootCaptured&&source) {
+        Matrix inverse;
+        if(CustomizationMath::RigidInverse(*source,inverse)) {
+            current->bodyWorld=*source;
+            current->drawRoot=current->heightChanged
+                ?CustomizationMath::Multiply(current->heightDelta,*source):*source;
+            current->rootCaptured=true;
+        } else {
+            // Retain all native geometry for scaled, non-affine or invalid roots.
+            current->heightChanged=false;
+        }
+    }
+    return result;
+}
 void __fastcall BodyPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,void* lighting,unsigned flags) {
     Matrix* transformed=matrix;
-    if(current&&current->car==car&&current->heightChanged&&matrix) {
+    if(current&&current->car==car&&current->rootCaptured&&current->heightChanged&&matrix) {
         // Native render queues keep the matrix pointer. Allocate from the game's frame pool.
         auto allocate=reinterpret_cast<Matrix*(__cdecl*)(int)>(0x405ed0);
         if(auto copy=allocate(1)) {
             *copy=CustomizationMath::MoveBodyPart(*matrix,current->bodyWorld,current->heightDelta);
             transformed=copy;
-        }
-    }
-    // BASE and BODY use the unanimated root. Its native scale and frontend bias
-    // are already present; wheel clip planes must follow this exact fender root.
-    if(current&&current->car==car&&transformed) {
-        const uintptr_t relative=reinterpret_cast<uintptr_t>(part)-reinterpret_cast<uintptr_t>(car);
-        if((relative>=0xb84&&relative<0xb84+20)||
-           (relative>=0xb84+23*20&&relative<0xb84+24*20)) {
-            current->drawRoot=*transformed;current->rootCaptured=true;
         }
     }
     // Calling the normal entry preserves the existing VRM RenderPart detour.
@@ -164,7 +172,7 @@ void __fastcall BodyPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,v
 using ViewRenderFn=void(__thiscall*)(void*,void*,Matrix*,void*,unsigned,void*);
 void __fastcall DirectBody(void* view,void*,void* model,Matrix* matrix,void* lighting,unsigned flags,void* material) {
     Matrix* transformed=matrix;
-    if(current&&current->heightChanged&&matrix) {
+    if(current&&current->rootCaptured&&current->heightChanged&&matrix) {
         auto allocate=reinterpret_cast<Matrix*(__cdecl*)(int)>(0x405ed0);
         if(auto copy=allocate(1)) {
             *copy=CustomizationMath::MoveBodyPart(*matrix,current->bodyWorld,current->heightDelta);
@@ -176,7 +184,9 @@ void __fastcall DirectBody(void* view,void*,void* model,Matrix* matrix,void* lig
 template<unsigned Wheel>
 void __fastcall WheelPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,void* lighting,unsigned flags) {
     CustomizationClip::Ticket ticket;
-    if(current&&current->car==car&&current->rootCaptured) {
+    // PC 0x74EA4E reads CarRenderInfo+0x40 as mDamageBehaviour. A fixed plane
+    // cannot describe its independently posed or damaged fender panels.
+    if(current&&current->car==car&&current->rootCaptured&&!car[0x40/4]) {
         ticket=CustomizationClip::BeginWheel(current->name,current->kit,Wheel,&current->drawRoot.m[0][0],view);
     }
     originalPart(car,view,part,matrix,lighting,flags);
@@ -218,6 +228,7 @@ bool Install() {
     if(GetModuleHandleA(nullptr)!=reinterpret_cast<HMODULE>(0x400000)||
        !Bytes(0x74e160,entry,sizeof(entry))||!Bytes(0x74efcf,front,sizeof(front))||
        !Bytes(0x74efe8,rear,sizeof(rear))||!CallTarget(0x74ec9b,0x7387e0)||
+       !CallTarget(0x74e91d,0x445090)||!CallTarget(0x74e9ad,0x6da9b0)||
        !CallTarget(0x74ed6b,0x6da9b0)||!CallTarget(0x74ee81,0x6da9b0)||!CallTarget(0x74ef45,0x6da9b0)) {
         Log("Stance hooks disabled: executable signature or hook ownership differs.");return false;
     }
@@ -229,8 +240,10 @@ bool Install() {
         MH_RemoveHook(reinterpret_cast<void*>(0x74e160));
         Log("Stance hooks disabled: trampoline activation failed.");return false;
     }
+    injector::MakeCALL(0x74e91d,CaptureBodyRoot,true); // Exact pre-animation native root
     injector::MakeCALL(0x74ec9b,BodyPart,true);
-    injector::MakeCALL(0x74ed6b,DirectBody,true); // Mirrors and license plate
+    injector::MakeCALL(0x74e9ad,DirectBody,true); // Left/right side mirrors
+    injector::MakeCALL(0x74ed6b,DirectBody,true); // License plate
     injector::MakeCALL(0x74ee81,DirectBody,true); // Spoiler, including marker variant
     injector::MakeCALL(0x74ef45,DirectBody,true); // Roof scoop, including marker variant
     injector::MakeJMP(0x74efcf,FrontCamber,true);

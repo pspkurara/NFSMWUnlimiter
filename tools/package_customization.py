@@ -63,7 +63,7 @@ def main():
         shutil.copy2(source, stage / 'scripts' / target)
     shutil.copy2(ROOT / 'distribution/README.txt', stage / 'README.txt')
     shutil.copytree(ROOT / 'docs', stage / 'docs')
-    for file in ('CustomizationCamera.md', 'CustomizationClip.md'):
+    for file in ('CustomizationCamera.md', 'CustomizationClip.md', 'CustomizationControls.md'):
         shutil.copy2(ROOT / file, stage / 'docs' / file)
     shutil.copy2(companion / 'README.md', stage / 'docs/Companion.md')
     shutil.copy2(ROOT / 'vendor/minhook/LICENSE.txt', stage / 'MinHook-LICENSE.txt')
@@ -73,7 +73,8 @@ def main():
     files = {p.relative_to(stage).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in sorted(stage.rglob('*')) if p.is_file()}
     manifest = {'schema': 1, 'kind': 'unfinished-development-snapshot', 'sourceCommits': revisions,
-                'nativeRuntimeQA': False, 'activeKeyConfigIntegration': False,
+                'nativeRuntimeQA': False, 'activeKeyConfigIntegration': True,
+                'activeKeyConfigRuntimeQA': False,
                 'inspectedExecutableSHA256': '0c5675a08cd71fd6d31ca87e992a915054bd8b80d268bff0561d7ecc2067e342', 'files': files}
     (stage / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     archive = dist / (name + '.zip')

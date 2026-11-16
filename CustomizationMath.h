@@ -18,6 +18,10 @@ inline Matrix Multiply(const Matrix& a,const Matrix& b) {
 }
 inline bool RigidInverse(const Matrix& a,Matrix& out) {
     // Reject scaled or degenerate transforms rather than corrupting animated parts.
+    for(int i=0;i<4;++i) for(int j=0;j<4;++j)
+        if(!std::isfinite(a.m[i][j])) return false;
+    for(int i=0;i<3;++i) if(std::fabs(a.m[i][3])>.0001f) return false;
+    if(std::fabs(a.m[3][3]-1.f)>.0001f) return false;
     for(int i=0;i<3;++i) for(int j=0;j<3;++j) {
         float dot=0;
         for(int k=0;k<3;++k) dot+=a.m[i][k]*a.m[j][k];

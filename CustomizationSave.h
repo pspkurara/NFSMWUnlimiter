@@ -294,6 +294,12 @@ static void Commit(const std::string& name) {
 }
 
 using SaveFn=void(__thiscall*)(DWORD*,void*,int);
+// Independent extensions observe the same native transaction without sharing state locks.
+static void (*ControlsBeginSave)(void*,bool)=nullptr;
+static void (*ControlsEndSave)(void*,bool)=nullptr;
+static void (*ControlsDone)(const char*)=nullptr;
+static void (*ControlsBeginLoad)()=nullptr;
+static void (*ControlsEndLoad)(const char*,void*,bool,bool,bool,int)=nullptr;
 using DoneFn=void(__thiscall*)(DWORD*,const char*);
 using LoadFn=bool(__thiscall*)(DWORD*,void*,int,bool,int);
 using BuildFn=void(__thiscall*)(DWORD*,uint32_t,int,DWORD*);
@@ -307,7 +313,11 @@ static void* NativeSaveBuffer() {
     return memoryCard?reinterpret_cast<void*>(memoryCard[0x44/4]):nullptr;
 }
 static void __fastcall Save(DWORD* profile,void*,void* buffer,int size) {
+    const bool active=profile==CurrentProfile();
+    const bool native=buffer==NativeSaveBuffer();
+    if(active&&ControlsBeginSave) ControlsBeginSave(buffer,native);
     OriginalSave(profile,buffer,size);
+    if(active&&ControlsEndSave) ControlsEndSave(buffer,native);
     if(profile!=CurrentProfile()) return;
     std::lock_guard<std::mutex> lock(Mutex);
     EnsureProfileLocked();
@@ -318,9 +328,16 @@ static void __fastcall Done(DWORD* callback,void*,const char* profile) {
     std::string name=Name(profile);
     OriginalDone(callback,profile);
     if(ValidName(name)) Commit(name);
+    if(ValidName(name)&&ControlsDone) ControlsDone(name.c_str());
 }
 static bool __fastcall Load(DWORD* profile,void*,void* buffer,int size,bool commit,int player) {
+    const bool native=buffer==NativeSaveBuffer();
+    if(ControlsBeginLoad) ControlsBeginLoad();
     bool result=OriginalLoad(profile,buffer,size,commit,player);
+    if(ControlsEndLoad) {
+        const std::string name=Name(reinterpret_cast<const char*>(profile));
+        ControlsEndLoad(name.c_str(),buffer,native,result&&profile==CurrentProfile(),commit,player);
+    }
     if(result&&commit&&player==0&&profile==CurrentProfile()) {
         std::lock_guard<std::mutex> lock(Mutex);
         std::string name=Name(reinterpret_cast<const char*>(profile));

@@ -1,7 +1,7 @@
 NFSMW Customization Lab - DEVELOPMENT SNAPSHOT
 
 This is unfinished experimental work, not a supported universal release.
-Driving-camera key-config integration and real-game verification remain open.
+Driving-camera key-config integration is implemented; real-game verification remains open.
 See docs/CUSTOMIZATION_LAB.md before attempting a test installation.
 
 The payload contains a fork of Unlimiter 3.3.1.1338 and an independent ASI.
@@ -19,6 +19,9 @@ For a later test installation:
    in its supplied INI and remains experimentally unverified.
 4. F6 opens the stance editor. Owned cars stage changes for the next normal
    game save; unowned cars explicitly use car-type INI presets.
+5. F7 from the native PC Controls screen opens driving-camera bindings.
+   Apply returns changes to the native controls confirmation transaction.
+   Preserve NFSMWCustomizationControls.bin alongside its matching profile.
 
 Rollback: exit the game, restore the backed-up original Unlimiter ASI, and
 rename NFSMWCustomizationLab.asi to NFSMWCustomizationLab.asi.disabled.

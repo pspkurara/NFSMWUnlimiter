@@ -18,6 +18,10 @@ This branch is unfinished; building it does not establish game compatibility.
 - `CustomizationSave.h`: profile-adjacent owned-car data staged by the companion
   editor and committed after the native SaveDone callback. See
   [save details](CUSTOMIZATION_SAVE.md).
+- `CustomizationControls.h`: additional F7 camera controls dialog attached to
+  native PC Controls transactions and native input serialization. Bindings use
+  a profile-adjacent controls sidecar. See the controls document for ownership
+  and the remaining native UI/runtime checks.
 - `CustomizationClip.h`: opt-in calibrated combined-wheel clipping in the main
   view, including deferred-queue tagging and D3D state restoration. It does not
   discover fenders. No unmeasured real-car plane is enabled by default.
@@ -61,21 +65,28 @@ Do not describe this branch as universally compatible.
 - MSVC Win32 Release build of the fork and companion.
 - CTest: body-transform math; owned-save preview/stage/native-success lifecycle;
   profile isolation; native-byte preservation; CRC/revision mismatch rejection;
-  same-equipment AI exclusion; companion range/override/loader/API tests.
+  same-equipment AI exclusion; controls serialization/backup/input-reader lifecycle;
+  companion range/override/loader/API tests.
 - D3D9 HAL fixture: a calibrated plane changed coverage from 1301 to 940 pixels;
   stdcall adapter, stale tags and clip-state restoration checked. This fixture
   used software vertex processing. Native-game and HWVP checks remain open.
-- Isolated game copy failed before device initialization at `speed.exe+0x2e6d5f`
+- With the original game running, the isolated copy failed at `speed.exe+0x2e6d5f`
   reading a null D3D device. The unmodified Unlimiter baseline failed at the same
-  address. This comparison does not verify any game feature or prove the cause
-  of the test environment's device failure.
+  address. After the user saved and exited the original, the baseline reached
+  its rendered loading screen. The modified fork/editor, with VRM disabled only
+  in the isolated copy, reached the main menu and rendered cars; debugger output
+  confirmed save and controls hooks installed. Feature-level checks remain open.
+- One test with VRM enabled stalled before a window appeared. Its main thread
+  was suspended and another VRM thread waited in loader synchronization; this
+  is evidence for a startup coexistence investigation, not a proven root cause.
+  The original installation and VRM source were not modified.
 
 ## Required work before a supported release
 
-Driving orbit bindings must be integrated with the active native key-config
-lifecycle, including accept, cancel, reset, load and new-profile behavior.
-They currently come from the camera INI/XInput provider. This user requirement
-is still outstanding; see [input research](CONTROLS_RESEARCH.md).
+Driving orbit bindings now use the active native key-config extension, including
+comparison, cancel, defaults, serialization and native input-reader ownership.
+This implementation still needs live accept/cancel/reset, load/create and restart
+verification; see [input research](CONTROLS_RESEARCH.md).
 
 In-game testing is also required for simultaneous sticks, driver menu exit,
 save/reload of two owned cars of the same type, garage-to-race RideInfo lineage,

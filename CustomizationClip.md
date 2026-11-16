@@ -119,6 +119,14 @@ No square root, matrix inversion or INI parsing occurs for untagged geometry.
 
 ## Validation and outstanding work
 
+The host captures the native pre-animation biased root at `0x74E91D`, rather
+than inferring it from a BASE/BODY part which may already contain door/damage
+animation. Non-rigid or invalid roots skip height adjustment and clipping.
+Instances with a damage actor (`CarRenderInfo+0x40`) skip wheel clipping because
+a fixed boundary cannot follow independently posed panels. This actor can exist
+before visible damage; driving instances with an actor may therefore remain
+unclipped. Its real-game coverage still needs verification.
+
 Performed on the current Windows 11 machine:
 
 - x86 MSVC C++17 `/W4` compilation of the full header and real naked/stdcall

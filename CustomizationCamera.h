@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdlib>
 #include "includes\injector\injector.hpp"
+#include "CustomizationControls.h"
 
 // Optional, independently guarded hooks for the PC 1.3 executable. No preview
 // state is written to RideInfo, the profile, or a game save.
@@ -15,17 +16,12 @@ namespace CustomizationCamera
     {
         bool garage = true;
         bool driverPreview = true;
-        bool raceOrbit = false;
         bool leftStick = false;
         bool invertX = false;
         bool invertY = false;
         DWORD controller = 0;
         float deadzone = 0.22f;
         float garageSpeed = 1.0f;
-        float raceDegreesPerSecond = 100.0f;
-        float pitchLimit = 60.0f;
-        float returnDelay = -1.0f;
-        float returnSpeed = 120.0f;
     };
 
     static Options Config;
@@ -255,7 +251,13 @@ namespace CustomizationCamera
         bool mainView = *reinterpret_cast<int*>(static_cast<BYTE*>(mover) + 0x10) == 1;
         float x = 0, y = 0;
         bool reset = false;
-        if (*reinterpret_cast<int*>(0x925E90) != 6 || !mainView || !ReadStick(x, y, reset))
+        const auto controls = CustomizationControls::Runtime();
+        static CustomizationControls::State lastControls;
+        if(!CustomizationControls::Equal(lastControls,controls)) {
+            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;
+        }
+        if (!controls.enabled || *reinterpret_cast<int*>(0x925E90) != 6 || !mainView ||
+            !CustomizationControls::ReadOrbit(controls, x, y, reset))
         {
             Yaw = Pitch = 0;
             LastOrbitTick = 0;
@@ -273,14 +275,14 @@ namespace CustomizationCamera
         if (reset) Yaw = Pitch = 0;
         else if (x != 0 || y != 0)
         {
-            Yaw = std::remainder(Yaw + x * Config.raceDegreesPerSecond * dt, 360.0f);
-            Pitch = Clamp(Pitch + y * Config.raceDegreesPerSecond * dt, -Config.pitchLimit, Config.pitchLimit);
+            Yaw = std::remainder(Yaw + x * controls.speed * dt, 360.0f);
+            Pitch = Clamp(Pitch + y * controls.speed * dt, -controls.pitchLimit, controls.pitchLimit);
             LastOrbitInput = now;
         }
-        else if (Config.returnDelay >= 0 && now - LastOrbitInput >= ULONGLONG(Config.returnDelay * 1000))
+        else if (controls.returnDelay >= 0 && now - LastOrbitInput >= ULONGLONG(controls.returnDelay * 1000))
         {
-            Yaw = ApproachZero(Yaw, Config.returnSpeed * dt);
-            Pitch = ApproachZero(Pitch, Config.returnSpeed * dt);
+            Yaw = ApproachZero(Yaw, controls.returnSpeed * dt);
+            Pitch = ApproachZero(Pitch, controls.returnSpeed * dt);
         }
         if (Yaw == 0 && Pitch == 0)
         {
@@ -328,17 +330,12 @@ namespace CustomizationCamera
         Settings settings;
         Config.garage = settings.ReadInteger("Garage", "Enabled", 1) != 0;
         Config.driverPreview = settings.ReadInteger("Garage", "PreviewDriver", 1) != 0;
-        Config.raceOrbit = settings.ReadInteger("RaceOrbit", "Enabled", 0) != 0;
         Config.leftStick = settings.ReadInteger("Input", "CameraStick", 1) == 0;
         Config.invertX = settings.ReadInteger("Input", "InvertX", 0) != 0;
         Config.invertY = settings.ReadInteger("Input", "InvertY", 0) != 0;
         Config.controller = DWORD(Clamp(float(settings.ReadInteger("Input", "ControllerIndex", 0)), 0, 3));
         Config.deadzone = Number(settings, "Input", "Deadzone", 0.22f, 0, 0.95f);
         Config.garageSpeed = Number(settings, "Garage", "RotationSpeed", 1, 0.01f, 10);
-        Config.raceDegreesPerSecond = Number(settings, "RaceOrbit", "DegreesPerSecond", 100, 1, 720);
-        Config.pitchLimit = Number(settings, "RaceOrbit", "PitchLimitDegrees", 60, 0, 80);
-        Config.returnDelay = Number(settings, "RaceOrbit", "ReturnDelaySeconds", -1, -1, 60);
-        Config.returnSpeed = Number(settings, "RaceOrbit", "ReturnDegreesPerSecond", 120, 1, 720);
 
         // No XInput import or replacement DLL: use the system runtime if available.
         HMODULE xinput = LoadLibraryExA("xinput1_4.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -378,9 +375,9 @@ namespace CustomizationCamera
 
         const unsigned char orbitCall[] = {0xE8, 0xDF, 0x13, 0x25, 0};
         const unsigned char moverView[] = {0x8B, 0x4E, 0x10};
-        if (Config.raceOrbit && Matches(0x47DCBC, orbitCall) && Matches(0x47DCC1, moverView))
+        if (Matches(0x47DCBC, orbitCall) && Matches(0x47DCC1, moverView))
             injector::MakeCALL(0x47DCBC, OrbitLookAtCave, true);
-        else if (Config.raceOrbit) Report("Race orbit signature mismatch; orbit hook not installed.");
+        else Report("Race orbit signature mismatch; orbit hook not installed.");
     }
 }
 

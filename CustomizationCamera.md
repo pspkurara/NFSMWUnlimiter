@@ -23,14 +23,6 @@ Enabled = 1
 PreviewDriver = 1
 RotationSpeed = 1.0
 
-[RaceOrbit]
-; Experimental: requires an in-game visual check before enabling by default.
-Enabled = 0
-DegreesPerSecond = 100
-PitchLimitDegrees = 60
-; -1 retains orientation when released; >=0 recenters after this delay.
-ReturnDelaySeconds = -1
-ReturnDegreesPerSecond = 120
 ```
 
 The garage camera uses the chosen XInput stick while a parts selection screen is
@@ -49,9 +41,15 @@ mesh, enable a disabled part, change NIS driver visibility, or touch a saved car
 Screen destruction clears preview state. Ordinary menus and racing keep the
 existing visibility rules.
 
+Driving controls are edited with F7 while the native controller options screen
+is open. The separate extension dialog participates in that screen's change
+comparison, cancellation and device defaults. Driving bindings and tuning are
+saved beside the native profile through the controls extension; the garage INI
+does not override them. See [controls lifecycle](docs/CONTROLS_RESEARCH.md).
+
 Experimental race orbit operates on the main player's Cubic camera look-at
 construction, after its normal camera calculations. Horizontal rotation covers
-360 degrees; vertical rotation is bounded; clicking the selected stick resets
+360 degrees; vertical rotation is bounded; the default right-stick click resets
 both axes. The orbit resets on mover change, controller disconnect, focus loss,
 and long update gaps. Mirror and split-screen views are excluded. Other camera
 movers, scripted ICE cameras and debug cameras are untouched.
@@ -64,7 +62,7 @@ the same call site are detected; replacements elsewhere may need separate
 compatibility settings. The native part-camera orientation and speed limits still
 apply in the garage. No model-specific camera offsets are assumed.
 
-## Separate ASI input integration
+## Separate ASI garage input integration
 
 `NFSCustomizationCameraSetInputV1` is a C export (cdecl; x86 export names may have
 a leading underscore). A separate input ASI may resolve it with `GetProcAddress`:
@@ -79,7 +77,8 @@ The callback supplies finite normalized axes in `[-1,1]` and a reset request. It
 must apply its own deadzone. The camera applies the configured axis inversion.
 Register/unregister on the game thread, and unregister before unloading the
 provider DLL. No pointer to provider-owned input state is retained. This API
-permits a standalone input plugin without another write to the game camera code.
+permits a standalone garage input plugin without another write to the game camera
+code. Driving input uses the active key-config extension instead.
 
 ## Binary evidence and validation
 
