@@ -18,6 +18,7 @@ namespace CustomizationCamera
     {
         bool garage = true;
         bool partsOnly = false;
+        bool inheritInversion = true, inheritDeadzone = true;
         bool driverPreview = true;
         bool resetOnLookBack = true;
         bool resetOnViewChange = true;
@@ -125,6 +126,8 @@ namespace CustomizationCamera
         x = y = 0;
         reset = false;
         if (!Foreground()) return false;
+        const auto tuning=CustomizationControls::GarageTuning(CustomizationControls::Runtime(),
+            Config.inheritInversion,Config.inheritDeadzone,{Config.deadzone,Config.invertX,Config.invertY});
         if (InputProvider)
         {
             BOOL requestReset = FALSE;
@@ -143,16 +146,16 @@ namespace CustomizationCamera
             reset = (pad.Gamepad.wButtons & (Config.leftStick ? XINPUT_GAMEPAD_LEFT_THUMB : XINPUT_GAMEPAD_RIGHT_THUMB)) != 0;
             // Radial deadzone preserves diagonals and rescales the live range.
             float length = std::sqrt(x * x + y * y);
-            if (length <= Config.deadzone) x = y = 0;
+            if (length <= tuning.deadzone) x = y = 0;
             else
             {
-                float scale = Clamp((length - Config.deadzone) / (1 - Config.deadzone), 0, 1) / length;
+                float scale = Clamp((length - tuning.deadzone) / (1 - tuning.deadzone), 0, 1) / length;
                 x *= scale;
                 y *= scale;
             }
         }
-        if (Config.invertX) x = -x;
-        if (Config.invertY) y = -y;
+        if (tuning.invertX) x = -x;
+        if (tuning.invertY) y = -y;
         return true;
     }
 
@@ -408,6 +411,8 @@ namespace CustomizationCamera
         Config.resetOnViewChange = settings.ReadInteger("RaceOrbit", "ResetOnViewChange", 1) != 0;
         Config.fixedEyePovMask = unsigned(settings.ReadInteger("RaceOrbit", "FixedEyePovMask", 3));
         Config.leftStick = settings.ReadInteger("Input", "CameraStick", 1) == 0;
+        Config.inheritInversion = settings.ReadInteger("Garage", "UseDrivingInversion", 1) != 0;
+        Config.inheritDeadzone = settings.ReadInteger("Garage", "UseDrivingDeadzone", 1) != 0;
         Config.invertX = settings.ReadInteger("Input", "InvertX", 0) != 0;
         Config.invertY = settings.ReadInteger("Input", "InvertY", 0) != 0;
         Config.controller = DWORD(Clamp(float(settings.ReadInteger("Input", "ControllerIndex", 0)), 0, 3));

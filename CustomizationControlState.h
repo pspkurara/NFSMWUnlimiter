@@ -18,6 +18,14 @@ struct State {
 };
 static_assert(sizeof(State)==96,"Controls sidecar state version 4");
 constexpr uint32_t LegacyStateBytes=72,Version2StateBytes=76,Version3StateBytes=88;
+// Garage axes have their own stick choice, but can share the active profile's
+// orientation/threshold without depending on the driving feature being enabled.
+struct AxisTuning {float deadzone;bool invertX,invertY;};
+inline AxisTuning GarageTuning(const State& driving,bool inheritInversion,bool inheritDeadzone,AxisTuning local) {
+    if(inheritInversion){local.invertX=driving.invertX!=0;local.invertY=driving.invertY!=0;}
+    if(inheritDeadzone)local.deadzone=driving.deadzone;
+    return local;
+}
 inline bool Equal(const State& a,const State& b) { return std::memcmp(&a,&b,sizeof(State))==0; }
 inline bool Valid(const State& s) {
     if(s.version!=4||s.vehicleHeading>1||s.hideMirror>1||s.mouseEnabled>1||s.orbitMode>1||s.enabled>1||s.controller>3||s.yawAxis>4||s.pitchAxis>4||

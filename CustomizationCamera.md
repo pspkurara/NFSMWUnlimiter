@@ -138,3 +138,20 @@ active, an idle stick preserves the rotation speeds already set by native mouse
 dragging; actual stick movement takes priority. The mouse handler's permission
 flags remain authoritative, and its existing wheel zoom path is retained.
 Added driving mouse controls are described in [controls](CustomizationControls.md).
+
+## Shared inversion and threshold
+
+Driving orbit already applies its active Controls editor inversion to sticks,
+keyboard axes and mouse drag. The PC frontend/input database examined here has
+no identified shared garage/driving camera inversion option to read safely; do
+not interpret a steering-axis sign as a camera preference.
+
+Garage stick rotation now defaults to the same active-profile inversion and
+Deadzone, even when driving orbit is disabled. The existing controls transaction
+and sidecar therefore also save/cancel these inherited preferences. The selected
+garage stick/controller and garage rotation speed retain their separate roles.
+Use `[Garage] UseDrivingInversion=0` or `UseDrivingDeadzone=0` independently to use
+that property from `[Input] InvertX/InvertY` or `Deadzone`. Existing INIs without
+the new keys inherit by default. A normalized external input provider retains
+its existing deadzone contract. The game's native garage mouse rotation path
+is unchanged; these garage switches concern the remapped stick.

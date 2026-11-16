@@ -10,6 +10,14 @@ int main(){try{
     Session session;
     require(Valid(session.active),"valid defaults");
     require(session.active.resetButtons==0,"defaults must not shadow native R3 camera-view action");
+    State shared;shared.enabled=0;shared.invertX=1;shared.deadzone=.4f;
+    const AxisTuning local{.1f,false,true};
+    auto garage=GarageTuning(shared,true,true,local);
+    require(garage.invertX&&!garage.invertY&&garage.deadzone==.4f,"garage inherits active tuning even with race orbit disabled");
+    garage=GarageTuning(shared,false,false,local);
+    require(!garage.invertX&&garage.invertY&&garage.deadzone==.1f,"garage explicit policy preserves its independent settings");
+    garage=GarageTuning(shared,true,false,local);
+    require(garage.invertX&&!garage.invertY&&garage.deadzone==.1f,"garage orientation and threshold inheritance are independent");
     session.Begin();auto next=session.active;next.enabled=1;next.keys[0]='J';
     require(session.Apply(next)&&session.Dirty(),"camera-only edit makes native controls dirty");
     session.Restore();require(!session.Dirty()&&!session.active.enabled,"native discard restores extension");
@@ -67,6 +75,10 @@ int main(){try{
     mouse.Update({6,false,0,0,0},next,false,yaw,pitch);mouse.Update({7,true,100,100,0},next,false,yaw,pitch);
     require(!mouse.owns,"fresh click does not apply prior movement");
     require(mouse.Update({8,true,10,0,0},next,false,yaw,pitch)&&mouse.owns,"new drag after release reclaims mouse");
+    next.invertX=next.invertY=1;MouseOrbit inverted;float invertedYaw=0,invertedPitch=0;
+    inverted.Update({1,true,0,0,0},next,false,invertedYaw,invertedPitch);
+    inverted.Update({2,true,10,-10,0},next,false,invertedYaw,invertedPitch);
+    require(std::fabs(invertedYaw+3)<.001f&&std::fabs(invertedPitch+3)<.001f,"mouse orbit respects both active inversion settings");
     next.mouseEnabled=0;mouse.Update({9,true,10,10,120},next,false,yaw,pitch);require(!mouse.owns&&mouse.zoom==1,"mouse option clears runtime ownership");
     require(Rotate(native,0,0,false,result,.5f)&&std::fabs(result.eye.x-6)<.001f,"wheel zoom changes external radius");
     require(Rotate(native,90,0,true,result,.5f)&&result.eye.x==1&&result.eye.y==2&&result.eye.z==3,"zoom never moves a first-person eye");
