@@ -24,6 +24,13 @@ fork; it does not require the separately distributed VRM plugin. VRM integration
 is optional coexistence, not an installation dependency. No separate ASI per
 individual camera/stance feature is required by this policy.
 
+The development standalone `NFSMWExtendedCamera.asi` has a separate build and
+package with no Unlimiter, ExtraOptions, VRM or stance-companion requirement.
+Its optional camera/input runtime API allows coinstallation with the matching
+updated fork in either initialization order. Older fork binaries without that
+API are not covered by this coinstallation contract. Cross-DLL state/ownership
+fixtures pass, but solo and combined native runtime QA is still pending.
+
 Only the inspected Windows 11 PC 1.3 executable has been exercised. The recorded
 SHA-256 identifies the test binary; it is not the extension's acceptance rule.
 Byte signatures passing on another executable are necessary but do not prove

@@ -42,11 +42,28 @@ run outside the registry lock, and retain the native reader's temporary-load
 semantics. Installation rolls back only its own hooks on failure. Callback modules
 are pinned for the process lifetime; dynamic unloading is unsupported.
 
-The fork still builds driving orbit into its own binary. A standalone camera ASI
-and coordinated driving/input ownership still need implementation and solo/combined
-runtime verification before calling it an independent installed product. Registry
-validation and actual native-wrapper transaction ordering have automated fixtures;
-cross-DLL load order has not yet been tested in-game.
+The fork still embeds driving orbit for existing installations. A standalone
+`NFSMWExtendedCamera.asi` is now built from `standalone/CMakeLists.txt`, without
+Unlimiter initialization, owned-car saves or the stance companion. Optional
+versioned controls/camera runtime APIs coordinate ownership in either load order.
+The second module reads the first module's active controls session, forwards input
+provider/mirror capabilities and registers the stance menu's garage update with
+the camera owner. It does not patch the native controls or camera sites again.
+Unknown older hook owners fail the existing signature checks.
+
+Automated fixtures load two separate DLL instances under the actual ASI names in
+both initialization orders. They check shared edits/discard, one runtime owner,
+mirror capabilities, idempotent garage observer registration and input-provider
+forwarding. Their native patch/UI startup is stubbed. Live solo/combined camera,
+native controls, save/restart, garage menus and driver previews still require QA
+before this development product is called supported. Profile registry/native
+transaction tests continue separately. No mandatory shared runtime ASI was added.
+
+`tools/package_camera.py` builds/tests the camera product and produces a binary
+package plus a source archive containing only its dependencies and standalone
+CMake entry point. It is suitable for a separate repository later; it contains
+no proprietary game data. The current stance test installation is not changed
+by building or packaging this product.
 
 ## Camera contexts
 

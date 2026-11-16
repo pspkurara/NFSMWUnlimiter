@@ -20,6 +20,7 @@ x64/
 x86/
 bld/
 build-customization/
+build-camera/
 dist/
 __pycache__/
 [Bb]in/

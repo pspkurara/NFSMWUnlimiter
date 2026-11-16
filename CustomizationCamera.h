@@ -32,7 +32,8 @@ namespace CustomizationCamera
     };
 
     static Options Config;
-    static void(__cdecl* GarageUpdateObserver)()=nullptr;
+    using GarageObserver=void(__cdecl*)();
+    static std::atomic<GarageObserver> GarageUpdateObserver{nullptr};
     static DWORD* PartsScreen = nullptr;
     static bool DriverPreviewActive = false;
     static bool GarageControlled = false;
@@ -46,7 +47,31 @@ namespace CustomizationCamera
     // A separate ASI may supply normalized, already mapped stick input through
     // this exported versioned API. Passing nullptr restores the XInput backend.
     typedef BOOL(__cdecl* InputProviderV1)(BOOL leftStick, float* x, float* y, BOOL* reset);
-    static InputProviderV1 InputProvider = nullptr;
+    static std::atomic<InputProviderV1> InputProvider{nullptr};
+    struct RuntimeApi {
+        uint32_t size=sizeof(RuntimeApi),version=1;
+        uint32_t(__cdecl* garageObserver)(void(__cdecl*)())=nullptr;
+        uint32_t(__cdecl* inputProvider)(InputProviderV1)=nullptr;
+    };
+    static_assert(sizeof(RuntimeApi)==16,"Camera runtime ABI 1");
+    static const RuntimeApi* Peer=nullptr;
+    static std::atomic<const RuntimeApi*> PublishedRuntime{nullptr};
+    static uint32_t __cdecl RegisterGarageObserver(void(__cdecl* callback)()) {
+        if(Peer)return Peer->garageObserver(callback);
+        if(!callback||!CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(callback)))return 0;
+        GarageObserver expected=nullptr;
+        return GarageUpdateObserver.compare_exchange_strong(expected,callback)||expected==callback?1u:0u;
+    }
+    static uint32_t __cdecl SetInputProvider(InputProviderV1 callback) {
+        if(Peer)return Peer->inputProvider(callback);
+        if(callback&&!CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(callback)))return 0;
+        InputProvider=callback;return 1;
+    }
+    static const RuntimeApi LocalRuntime={sizeof(RuntimeApi),1,&RegisterGarageObserver,&SetInputProvider};
+    static bool PublishRuntime() {
+        if(!CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(&RegisterGarageObserver)))return false;
+        PublishedRuntime.store(&LocalRuntime,std::memory_order_release);return true;
+    }
 
     class Settings
     {
@@ -129,10 +154,11 @@ namespace CustomizationCamera
         if (!Foreground()) return false;
         const auto tuning=CustomizationControls::GarageTuning(CustomizationControls::Runtime(),
             Config.inheritInversion,Config.inheritDeadzone,{Config.deadzone,Config.invertX,Config.invertY});
-        if (InputProvider)
+        const auto provider=InputProvider.load();
+        if (provider)
         {
             BOOL requestReset = FALSE;
-            if (!InputProvider(Config.leftStick, &x, &y, &requestReset) ||
+            if (!provider(Config.leftStick, &x, &y, &requestReset) ||
                 !std::isfinite(x) || !std::isfinite(y)) return false;
             x = Clamp(x, -1, 1);
             y = Clamp(y, -1, 1);
@@ -202,7 +228,7 @@ namespace CustomizationCamera
 
     static void __fastcall GarageJoyEvents(DWORD* garage, void*)
     {
-        if(GarageUpdateObserver)GarageUpdateObserver();
+        if(auto observer=GarageUpdateObserver.load())observer();
         DriverPreviewActive = Config.driverPreview && PartsScreen && garage[0x88 / 4] == 0x308;
         float x = 0, y = 0;
         bool reset = false;
@@ -413,6 +439,20 @@ namespace CustomizationCamera
     static void Install()
     {
         if (Installed) return;
+        CustomizationRuntimePeer::Gate gate(L"CameraRuntime");if(!gate)return;
+        // Each consumer may use the system pad reader for its own UI modifiers.
+        HMODULE xinput = LoadLibraryExA("xinput1_4.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!xinput) xinput = LoadLibraryExA("xinput9_1_0.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (xinput) GetPadState = reinterpret_cast<decltype(GetPadState)>(GetProcAddress(xinput, "XInputGetState"));
+        Peer=CustomizationRuntimePeer::Find<RuntimeApi>("MWCL_GetCameraRuntimeV1",[](const RuntimeApi& api) {
+            return api.size==sizeof(RuntimeApi)&&api.version==1&&
+                CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(api.garageObserver))&&
+                CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(api.inputProvider));
+        });
+        if(Peer) {Installed=true;PublishedRuntime.store(Peer,std::memory_order_release);return;}
+#ifdef MWCL_CAMERA_RUNTIME_FIXTURE
+        Installed=PublishRuntime();return;
+#endif
         Installed = true;
         Settings settings;
         Config.garage = settings.ReadInteger("Garage", "Enabled", 1) != 0;
@@ -429,11 +469,6 @@ namespace CustomizationCamera
         Config.controller = DWORD(Clamp(float(settings.ReadInteger("Input", "ControllerIndex", 0)), 0, 3));
         Config.deadzone = Number(settings, "Input", "Deadzone", 0.22f, 0, 0.95f);
         Config.garageSpeed = Number(settings, "Garage", "RotationSpeed", 1, 0.01f, 10);
-
-        // No XInput import or replacement DLL: use the system runtime if available.
-        HMODULE xinput = LoadLibraryExA("xinput1_4.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-        if (!xinput) xinput = LoadLibraryExA("xinput9_1_0.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-        if (xinput) GetPadState = reinterpret_cast<decltype(GetPadState)>(GetProcAddress(xinput, "XInputGetState"));
 
         const unsigned char mouseDelta[]={0x89,0x4E,0x14,0x89,0x56,0x18};
         const unsigned char mouseHeld[]={0xA0,0x70,0x7F,0x98,0};
@@ -463,7 +498,8 @@ namespace CustomizationCamera
         const unsigned char joyCall[] = {0xE8, 0xE8, 0x83, 0xFE, 0xFF};
         const unsigned char joyBranch[] = {0x8A, 0x46, 0x78, 0x84, 0xC0, 0x75, 0x0D, 0xA0, 0x34, 0x61, 0x92, 0};
         const unsigned char rotateFunction[] = {0x8B, 0x81, 0x80, 0, 0, 0, 0x33, 0xD2};
-        if ((Config.garage || Config.driverPreview) && Matches(0x7B9F23, joyCall) && Matches(0x7A2380, joyBranch) &&
+        // Also supplies native-menu updates when both optional garage features are off.
+        if (Matches(0x7B9F23, joyCall) && Matches(0x7A2380, joyBranch) &&
             Matches(0x476E70, rotateFunction) && Matches(0x476F30, rotateFunction))
             injector::MakeCALL(0x7B9F23, GarageJoyEvents, true);
         else if (Config.garage || Config.driverPreview) Report("Garage camera signature mismatch; input hook not installed.");
@@ -511,10 +547,11 @@ namespace CustomizationCamera
             if(Matches(0x595D40,mirrorEntry)&&Matches(0x6CFB75,mirrorEnter)&&Matches(0x6CFBC8,mirrorLeave)) {
                 injector::MakeCALL(0x6CFB75,MirrorVisible,true);
                 injector::MakeCALL(0x6CFBC8,MirrorVisible,true);
-                CustomizationControls::MirrorAvailable=true;
+                CustomizationControls::SetMirrorAvailable(true);
             } else Report("Native mirror visibility layout differs; orbit auto-hide disabled.");
         }
         else Report("Race orbit signature mismatch; orbit hook not installed.");
+        if(!PublishRuntime())Report("Camera runtime service could not be pinned.");
     }
 }
 
@@ -522,6 +559,8 @@ extern "C" __declspec(dllexport) BOOL __cdecl NFSCustomizationCameraSetInputV1(
     unsigned int version, CustomizationCamera::InputProviderV1 provider)
 {
     if (version != 1) return FALSE;
-    CustomizationCamera::InputProvider = provider;
-    return TRUE;
+    return CustomizationCamera::SetInputProvider(provider)?TRUE:FALSE;
+}
+extern "C" __declspec(dllexport) const CustomizationCamera::RuntimeApi* __cdecl MWCL_GetCameraRuntimeV1() {
+    return CustomizationCamera::PublishedRuntime.load(std::memory_order_acquire);
 }

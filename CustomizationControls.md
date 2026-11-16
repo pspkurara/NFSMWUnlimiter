@@ -58,7 +58,8 @@ extension's controller bindings along with the native controller defaults.
 The host connects five lifecycle callbacks after `CustomizationControls::Install`
 receives a successful native-lifecycle status: BeginSave, EndSave, Done,
 BeginLoad and EndLoad. The controls implementation itself does not include
-CustomizationSave or owned-car tables. The fork currently supplies the host.
+CustomizationSave or owned-car tables. The fork and standalone camera can each
+supply the host; the later module subscribes to the already published owner.
 They must run around the actual original native SaveToBuffer/LoadFromBuffer,
 and Done must run after confirmed native disk-save success. Rendering and the
 dialog share a mutex for active state; no sidecar I/O runs under this mutex.
@@ -66,6 +67,13 @@ Tests cover camera-only dirty detection, discard, device reset, actual sidecar
 serialization, exact save snapshots, temporary-buffer identity, no-reader profile
 creation, partial input streams, CRC and native revision rejection. Live input and native UI behavior
 still require testing in the game on the available Windows 11 installation.
+
+The optional `MWCL_GetControlsRuntimeV1` and `MWCL_GetCameraRuntimeV1` services
+allow the standalone ASI and matching fork to share a single active controls
+session and camera/input hook owner. The shared State ABI is size/version checked.
+Only the controls owner starts the dialog and subscribes its controls observer;
+later modules query that state, preserving cancel/load behavior and one sidecar
+writer. Callback code is pinned for process lifetime; dynamic unload is unsupported.
 
 ## Orbit modes and sidecar migration
 

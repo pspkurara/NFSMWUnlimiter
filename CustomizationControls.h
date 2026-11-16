@@ -2,6 +2,7 @@
 #include "CustomizationControlState.h"
 #include "CustomizationProfileStorage.h"
 #include "CustomizationProfileHost.h"
+#include "CustomizationRuntimePeer.h"
 #include <MinHook.h>
 #include <mutex>
 #include <map>
@@ -15,6 +16,15 @@
 // PC 1.3 input extensions. The native profile owns the input configuration;
 // switching a profile only switches this state when its native input reader ran.
 namespace CustomizationControls {
+struct RuntimeApi {
+    uint32_t size=sizeof(RuntimeApi),version=1,stateBytes=sizeof(State);
+    uint32_t(__cdecl* snapshot)(State*)=nullptr;
+    uint32_t(__cdecl* readOrbit)(const State*,float*,float*,uint32_t*)=nullptr;
+    void(__cdecl* mirrorAvailable)(uint32_t)=nullptr;
+};
+static_assert(sizeof(RuntimeApi)==24,"Camera controls runtime ABI 1");
+static const RuntimeApi* Peer=nullptr;
+static std::atomic<const RuntimeApi*> PublishedRuntime{nullptr};
 static std::mutex ControlMutex;
 static std::mutex FileMutex;
 static Session ControlSession;
@@ -40,7 +50,13 @@ static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=null
 static std::array<HWND,5> Keys{},Tuning{};
 static DWORD(WINAPI* PadState)(DWORD,XINPUT_STATE*)=nullptr;
 
-static State Runtime() {std::lock_guard<std::mutex> lock(ControlMutex);return ControlSession.active;}
+static State Runtime() {
+    if(Peer) {State result{};if(Peer->snapshot(&result))return result;return State{};}
+    std::lock_guard<std::mutex> lock(ControlMutex);return ControlSession.active;
+}
+static void SetMirrorAvailable(bool available) {
+    if(Peer)Peer->mirrorAvailable(available?1u:0u);else MirrorAvailable=available;
+}
 static bool Foreground() {DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);return pid==GetCurrentProcessId();}
 static float Axis(const XINPUT_GAMEPAD& p,unsigned axis) {
     switch(axis){case 1:return p.sThumbLX/32768.f;case 2:return p.sThumbLY/32768.f;
@@ -48,6 +64,7 @@ static float Axis(const XINPUT_GAMEPAD& p,unsigned axis) {
 }
 static bool ReadOrbit(const State& s,float& x,float& y,bool& reset) {
     x=y=0;reset=false;
+    if(Peer) {uint32_t centered=0;const bool result=Peer->readOrbit(&s,&x,&y,&centered)!=0;reset=centered!=0;return result;}
     if(!Installed||!s.enabled||Dialog||!Foreground())return false;
     XINPUT_STATE pad{};
     const bool connected=PadState&&PadState(s.controller,&pad)==ERROR_SUCCESS;
@@ -69,6 +86,20 @@ static bool ReadOrbit(const State& s,float& x,float& y,bool& reset) {
     return true;
 }
 static bool ReadOrbit(float& x,float& y,bool& reset) {return ReadOrbit(Runtime(),x,y,reset);}
+static uint32_t __cdecl SnapshotRuntime(State* result) {
+    if(!result)return 0;*result=Runtime();return 1;
+}
+static uint32_t __cdecl ReadRuntimeOrbit(const State* state,float* x,float* y,uint32_t* reset) {
+    if(!state||!x||!y||!reset)return 0;
+    State valid;if(!DecodeState(state,sizeof(*state),valid))return 0;
+    bool centered=false;const bool result=ReadOrbit(valid,*x,*y,centered);*reset=centered?1u:0u;return result?1u:0u;
+}
+static void __cdecl RuntimeMirror(uint32_t value) {MirrorAvailable=value!=0;}
+static const RuntimeApi LocalRuntime={sizeof(RuntimeApi),1,sizeof(State),&SnapshotRuntime,&ReadRuntimeOrbit,&RuntimeMirror};
+static bool PublishRuntime() {
+    if(!CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(&SnapshotRuntime)))return false;
+    PublishedRuntime.store(&LocalRuntime,std::memory_order_release);return true;
+}
 
 struct FileHeader {
     char magic[8]={'M','W','C','L','I','N','1',0};
@@ -322,6 +353,17 @@ static void __fastcall Defaults(DWORD* screen,void*){
 static bool Install(bool nativeLifecycleReady){
     if(Installed)return true;
     if(!nativeLifecycleReady)return false;
+    CustomizationRuntimePeer::Gate gate(L"CameraControls");if(!gate)return false;
+    Peer=CustomizationRuntimePeer::Find<RuntimeApi>("MWCL_GetControlsRuntimeV1",[](const RuntimeApi& api) {
+        return api.size==sizeof(RuntimeApi)&&api.version==1&&api.stateBytes==sizeof(State)&&
+            CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(api.snapshot))&&
+            CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(api.readOrbit))&&
+            CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(api.mirrorAvailable));
+    });
+    if(Peer) {Installed=true;PublishedRuntime.store(Peer,std::memory_order_release);return true;}
+#ifdef MWCL_CAMERA_RUNTIME_FIXTURE
+    Installed=true;return PublishRuntime();
+#endif
     char path[MAX_PATH]{};HMODULE module=nullptr;
     if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCSTR>(&Install),&module)&&GetModuleFileNameA(module,path,MAX_PATH)) {
@@ -350,7 +392,7 @@ static bool Install(bool nativeLifecycleReady){
         if(ok){
             HMODULE xinput=LoadLibraryExW(L"xinput1_4.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);if(!xinput)xinput=LoadLibraryExW(L"xinput9_1_0.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
             if(xinput)PadState=reinterpret_cast<decltype(PadState)>(GetProcAddress(xinput,"XInputGetState"));
-            if(CustomizationProfileHost::Register(ControlsObserver)) {
+            if(CustomizationProfileHost::Register(ControlsObserver)&&PublishRuntime()) {
                 Installed=true;if(auto thread=CreateThread(nullptr,0,RunUI,nullptr,0,nullptr))CloseHandle(thread);
                 CustomizationProfileStorage::Log("Native controls lifecycle extension registered with profile host.");return true;
             }
@@ -358,4 +400,7 @@ static bool Install(bool nativeLifecycleReady){
     }
     for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].at));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].at));}return false;
 }
+}
+extern "C" __declspec(dllexport) const CustomizationControls::RuntimeApi* __cdecl MWCL_GetControlsRuntimeV1() {
+    return CustomizationControls::PublishedRuntime.load(std::memory_order_acquire);
 }

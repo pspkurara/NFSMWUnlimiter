@@ -13,6 +13,12 @@ target_compile_definitions(NFSMWUnlimiter PRIVATE _CRT_SECURE_NO_WARNINGS NOMINM
 target_compile_options(NFSMWUnlimiter PRIVATE /W3 /utf-8 /EHsc /Zc:strictStrings- /permissive)
 target_link_libraries(NFSMWUnlimiter PRIVATE minhook bcrypt)
 set_target_properties(NFSMWUnlimiter PROPERTIES PREFIX "" SUFFIX ".asi")
+add_library(NFSMWExtendedCamera SHARED standalone/camera.cpp)
+target_include_directories(NFSMWExtendedCamera PRIVATE includes)
+target_compile_definitions(NFSMWExtendedCamera PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(NFSMWExtendedCamera PRIVATE /W3 /utf-8 /EHsc)
+target_link_libraries(NFSMWExtendedCamera PRIVATE minhook bcrypt)
+set_target_properties(NFSMWExtendedCamera PROPERTIES PREFIX "" SUFFIX ".asi")
 enable_testing()
 add_executable(customization_math_tests tests/customization_math_tests.cpp)
 target_compile_options(customization_math_tests PRIVATE /W4 /utf-8 /EHsc)
@@ -55,3 +61,25 @@ target_link_libraries(customization_random_tests PRIVATE minhook bcrypt)
 target_compile_definitions(customization_random_tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_compile_options(customization_random_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_random COMMAND customization_random_tests)
+
+# Real separate DLL instances exercise both ASI initialization orders. Only the
+# native patch/UI startup is stubbed; discovery, exported ABI and state are real.
+foreach(kind IN ITEMS unlimiter camera)
+  add_library(camera_runtime_fixture_${kind} SHARED tests/camera_runtime_fixture.cpp)
+  target_include_directories(camera_runtime_fixture_${kind} PRIVATE includes)
+  target_compile_definitions(camera_runtime_fixture_${kind} PRIVATE MWCL_CAMERA_RUNTIME_FIXTURE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+  target_compile_options(camera_runtime_fixture_${kind} PRIVATE /W3 /utf-8 /EHsc)
+  target_link_libraries(camera_runtime_fixture_${kind} PRIVATE minhook bcrypt)
+  set_target_properties(camera_runtime_fixture_${kind} PROPERTIES PREFIX "" SUFFIX ".asi"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime-fixtures"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime-fixtures"
+    PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/runtime-fixtures")
+endforeach()
+set_target_properties(camera_runtime_fixture_unlimiter PROPERTIES OUTPUT_NAME NFSMWUnlimiter)
+set_target_properties(camera_runtime_fixture_camera PROPERTIES OUTPUT_NAME NFSMWExtendedCamera)
+add_executable(camera_runtime_peer_tests tests/camera_runtime_peer_tests.cpp)
+target_compile_options(camera_runtime_peer_tests PRIVATE /W4 /utf-8 /EHsc)
+add_test(NAME camera_runtime_unlimiter_first COMMAND camera_runtime_peer_tests
+  $<TARGET_FILE:camera_runtime_fixture_unlimiter> $<TARGET_FILE:camera_runtime_fixture_camera>)
+add_test(NAME camera_runtime_camera_first COMMAND camera_runtime_peer_tests
+  $<TARGET_FILE:camera_runtime_fixture_camera> $<TARGET_FILE:camera_runtime_fixture_unlimiter>)

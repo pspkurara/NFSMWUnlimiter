@@ -411,7 +411,11 @@ static bool Install() {
     for(const auto& hook:hooks){if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.replacement,hook.original)!=MH_OK){ok=false;break;}++created;}
     if(ok)for(const auto& hook:hooks)if(MH_EnableHook(reinterpret_cast<void*>(hook.address))!=MH_OK){ok=false;break;}
     if(!ok){for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}return false;}
-    Installed=true;CustomizationCamera::GarageUpdateObserver=&Tick;
+    if(!CustomizationCamera::RegisterGarageObserver(&Tick)) {
+        for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}
+        CustomizationSave::Log("Native stance menu disabled: garage update owner unavailable.");return false;
+    }
+    Installed=true;
     CustomizationSave::Log("Native body-shop stance menu installed (free grouped adjustment).");return true;
 }
 }
