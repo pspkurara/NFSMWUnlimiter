@@ -24,7 +24,9 @@ Cancel does not apply its local fields. If the native screen is destroyed or
 recreated while the dialog is open, applying the stale dialog is refused.
 
 The camera ships disabled and keyboard actions unbound. Default pad axes are
-right X/Y with right-thumb reset. This input mapping affects race orbit; garage
+right X/Y; reset is unbound because right-thumb click commonly changes the
+native camera view. Remap that native action first if assigning right-thumb
+reset here. This input mapping affects race orbit; garage
 part camera input remains separately configured. Runtime uses the active state,
 not a global INI. The camera hook must query `Runtime()` and `ReadOrbit()`.
 If any guarded native lifecycle hook conflicts or differs, the controls extension

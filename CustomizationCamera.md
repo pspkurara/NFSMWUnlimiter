@@ -49,8 +49,16 @@ does not override them. See [controls lifecycle](docs/CONTROLS_RESEARCH.md).
 
 Experimental race orbit operates on the main player's Cubic camera look-at
 construction, after its normal camera calculations. Horizontal rotation covers
-360 degrees; vertical rotation is bounded; the default right-stick click resets
-both axes. The orbit resets on mover change, controller disconnect, focus loss,
+360 degrees; vertical rotation is bounded; an optional reset binding resets
+both axes. Reset ships unbound to avoid the native right-stick-click camera-view
+action. With `[RaceOrbit] ResetOnLookBack=1` (default), the native remapped
+look-back action clears the orbit and keeps the stock view while held, including
+when the orbit stick is moved simultaneously. Releasing look-back leaves the
+orbit centered. This uses the verified Cubic action flag, not an Xbox button
+number; set the option to 0 to retain the independent orbit offset. The flag's
+setter, getter and Update byte signatures must all match or only this automatic
+reset is disabled. This change still needs in-game verification.
+The orbit resets on mover change, controller disconnect, focus loss,
 and long update gaps. Mirror and split-screen views are excluded. Other camera
 movers, scripted ICE cameras and debug cameras are untouched.
 

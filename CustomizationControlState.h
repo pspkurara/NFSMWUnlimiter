@@ -7,7 +7,8 @@ namespace CustomizationControls {
 // POD file schema: no pointers, device GUIDs, profile pointers, or input samples.
 struct State {
     uint32_t version=1, enabled=0, controller=0, yawAxis=3, pitchAxis=4;
-    uint32_t resetButtons=0x80, invertX=0, invertY=0;
+    // R3 already changes the native camera view on common Xbox mappings.
+    uint32_t resetButtons=0, invertX=0, invertY=0;
     uint32_t keys[5]{}; // left, right, up, down, reset; Windows VK, 0=unbound
     float deadzone=.22f, speed=100.f, pitchLimit=60.f, returnDelay=-1.f, returnSpeed=120.f;
 };

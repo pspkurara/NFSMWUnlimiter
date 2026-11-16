@@ -63,5 +63,14 @@ int main() {
     strcpy_s(reinterpret_cast<char*>(profile.data()),32,"Beta");EnsureProfileLocked();
     Check(Profile=="Beta"&&Pending.empty()&&Preview.empty()&&Tokens.empty(),"Profile switch clears all session ownership");
     Check(!ValidName("../Alpha")&&!ValidName("Alpha/Beta")&&ValidName("Alpha"),"Profile path traversal rejected");
+    const BYTE importedCall[]={0xFF,0x15,0xEC,0x02,0x89,0};
+    BYTE redirectedCall[]={0xE8,0,0,0,0,0x90};
+    const int32_t offset=-37;std::memcpy(redirectedCall+1,&offset,sizeof(offset));
+    Check(FolderCallTarget(importedCall,0x12345678)==0x12345678 &&
+        FolderCallTarget(redirectedCall,0)==reinterpret_cast<uintptr_t>(redirectedCall)+5+offset,
+        "Native and redirected folder calls select the actual game path provider");
+    redirectedCall[5]=0xCC;
+    Check(!FolderCallTarget(redirectedCall,0x12345678),"Unknown directory patches disable sidecar I/O");
+    Check(CompletedProfileName("C:\\Games\\SAVE\\Alpha\\Alpha")=="Alpha"&&CompletedProfileName("Alpha")=="Alpha", "PC completion filenames normalize without using incoming directories");
     std::cout<<"Save lifecycle, isolation, CRC and native-byte preservation passed\n";
 }

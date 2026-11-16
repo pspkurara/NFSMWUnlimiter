@@ -16,6 +16,7 @@ namespace CustomizationCamera
     {
         bool garage = true;
         bool driverPreview = true;
+        bool resetOnLookBack = true;
         bool leftStick = false;
         bool invertX = false;
         bool invertY = false;
@@ -29,6 +30,7 @@ namespace CustomizationCamera
     static bool DriverPreviewActive = false;
     static bool GarageControlled = false;
     static bool Installed = false;
+    static bool NativeLookBackVerified = false;
     static DWORD(__stdcall* GetPadState)(DWORD, XINPUT_STATE*) = nullptr;
 
     // A separate ASI may supply normalized, already mapped stick input through
@@ -264,6 +266,17 @@ namespace CustomizationCamera
             original(matrix, eye, look, up);
             return;
         }
+        // Read the action after native key mapping, not a fixed controller button.
+        // While held, stock look-back owns the view even if the orbit stick moves.
+        if (Config.resetOnLookBack && NativeLookBackVerified &&
+            *reinterpret_cast<const BYTE*>(static_cast<const BYTE*>(mover) + 0xA1))
+        {
+            Yaw = Pitch = 0;
+            LastMover = mover;
+            LastOrbitTick = LastOrbitInput = now;
+            original(matrix, eye, look, up);
+            return;
+        }
         if (LastMover != mover || !LastOrbitTick || now - LastOrbitTick > 250)
         {
             Yaw = Pitch = 0;
@@ -330,6 +343,7 @@ namespace CustomizationCamera
         Settings settings;
         Config.garage = settings.ReadInteger("Garage", "Enabled", 1) != 0;
         Config.driverPreview = settings.ReadInteger("Garage", "PreviewDriver", 1) != 0;
+        Config.resetOnLookBack = settings.ReadInteger("RaceOrbit", "ResetOnLookBack", 1) != 0;
         Config.leftStick = settings.ReadInteger("Input", "CameraStick", 1) == 0;
         Config.invertX = settings.ReadInteger("Input", "InvertX", 0) != 0;
         Config.invertY = settings.ReadInteger("Input", "InvertY", 0) != 0;
@@ -372,6 +386,15 @@ namespace CustomizationCamera
             injector::MakeNOP(0x74EC54, 1, true);
         }
         else if (Config.driverPreview) Report("Driver visibility signature mismatch; render hook not installed.");
+
+        // PC Cubic setter, getter and Update independently identify the same flag.
+        const unsigned char lookBackSetter[] = {0x8A,0x44,0x24,0x04,0x88,0x81,0xA1,0,0,0,0xC2,0x04,0};
+        const unsigned char lookBackGetter[] = {0x8A,0x81,0xA1,0,0,0,0xF6,0xD8,0x1B,0xC0,0x25,0,0x80,0,0,0xC3};
+        const unsigned char lookBackUpdate[] = {0x8A,0x86,0xA1,0,0,0,0x84,0xC0};
+        NativeLookBackVerified = Matches(0x4741A0,lookBackSetter) &&
+            Matches(0x4741D0,lookBackGetter) && Matches(0x47D7ED,lookBackUpdate);
+        if (Config.resetOnLookBack && !NativeLookBackVerified)
+            Report("Native look-back layout not verified; automatic orbit reset disabled.");
 
         const unsigned char orbitCall[] = {0xE8, 0xDF, 0x13, 0x25, 0};
         const unsigned char moverView[] = {0x8B, 0x4E, 0x10};

@@ -11,10 +11,13 @@
 // switching a profile only switches this state when its native input reader ran.
 namespace CustomizationControls {
 static std::mutex ControlMutex;
+static std::mutex FileMutex;
 static Session ControlSession;
 static DWORD* Screen=nullptr;
 static uint64_t ScreenGeneration=0,DialogGeneration=0;
-static bool Installed=false;
+static bool Installed=false,AllowLiveEditing=false,DialogLive=false;
+static unsigned OpenKey=VK_F7;
+static std::string DialogProfile;
 static thread_local bool WroteInput=false,ReadInput=false;
 static thread_local State WrittenState{};
 static thread_local bool ResetLoadedController=false;
@@ -89,31 +92,45 @@ static void OnBeginSave(void* buffer,bool native) {
     if(native)SaveCaptured=false;else Backups.erase(buffer);
 }
 static void OnEndSave(void* buffer,bool native) {
-    if(!WroteInput)return;
+    if(!WroteInput){CustomizationSave::Log("Input writer not completed in this profile snapshot.");return;}
     auto profile=CustomizationSave::CurrentProfile();if(!profile)return;
     std::string name=CustomizationSave::Name(reinterpret_cast<const char*>(profile));
     std::lock_guard<std::mutex> lock(ControlMutex);
-    if(native){Saving=WrittenState;SavingProfile=name;SaveCaptured=true;}
+    if(native){Saving=WrittenState;SavingProfile=name;SaveCaptured=true;CustomizationSave::Log("Native disk-save input snapshot captured.");}
     else {if(Backups.size()>8)Backups.clear();Backups[buffer]={name,WrittenState,WrittenInputCrc};}
 }
-static void OnSaveDone(const char* profile) {
-    State snapshot;std::string name=CustomizationSave::Name(profile);
-    {std::lock_guard<std::mutex> lock(ControlMutex);if(!SaveCaptured||name!=SavingProfile)return;snapshot=Saving;SaveCaptured=false;}
+static bool WriteState(const std::string& name,const State& snapshot) {
+    if(!Valid(snapshot)||!CustomizationSave::ValidName(name))return false;
+    std::lock_guard<std::mutex> fileLock(FileMutex);
     try {
-        auto directory=CustomizationSave::ProfileDirectory(name);if(directory.empty())return;
+        auto directory=CustomizationSave::ProfileDirectory(name);if(directory.empty())return false;
         FileHeader header;std::array<uint8_t,32> digest{};
-        if(!CustomizationSave::Digest(directory/name,digest))return;
+        if(!CustomizationSave::Digest(directory/name,digest)){CustomizationSave::Log("Controls sidecar: completed native file not found at resolved directory.");return false;}
         std::memcpy(header.digest,digest.data(),32);header.crc=CustomizationSave::Crc(&snapshot,sizeof(snapshot));
         auto target=directory/L"NFSMWCustomizationControls.bin",temp=directory/L"NFSMWCustomizationControls.bin.tmp";
         HANDLE file=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(file==INVALID_HANDLE_VALUE)return;
+        if(file==INVALID_HANDLE_VALUE)return false;
         DWORD bytes=0;
         bool ok=WriteFile(file,&header,sizeof(header),&bytes,nullptr)&&bytes==sizeof(header)&&
             WriteFile(file,&snapshot,sizeof(snapshot),&bytes,nullptr)&&bytes==sizeof(snapshot)&&FlushFileBuffers(file);
         CloseHandle(file);
+        std::array<uint8_t,32> currentDigest{};
+        ok=ok&&CustomizationSave::Digest(directory/name,currentDigest)&&currentDigest==digest;
         if(ok&&std::filesystem::exists(target))CopyFileW(target.c_str(),(directory/L"NFSMWCustomizationControls.bin.bak").c_str(),FALSE);
-        if(!ok||!MoveFileExW(temp.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))DeleteFileW(temp.c_str());
-    }catch(...){CustomizationSave::Log("Input sidecar commit failed; native save untouched.");}
+        ok=ok&&MoveFileExW(temp.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH);
+        if(!ok)DeleteFileW(temp.c_str());
+        else CustomizationSave::Log("Controls sidecar committed beside completed native save.");
+        return ok;
+    }catch(...){CustomizationSave::Log("Input sidecar commit failed; native save untouched.");return false;}
+}
+static void OnSaveDone(const char* profile) {
+    State snapshot;std::string name=CustomizationSave::Name(profile);
+    {std::lock_guard<std::mutex> lock(ControlMutex);if(!SaveCaptured||name!=SavingProfile)return;snapshot=Saving;SaveCaptured=false;}
+    WriteState(name,snapshot);
+}
+static std::string CurrentName() {
+    auto profile=CustomizationSave::CurrentProfile();
+    return profile&&reinterpret_cast<const BYTE*>(profile)[32]?CustomizationSave::Name(reinterpret_cast<const char*>(profile)):std::string();
 }
 static void OnBeginLoad() {ReadInput=false;ResetLoadedController=false;}
 static void OnEndLoad(const char* profile,void* buffer,bool native,bool,bool,int) {
@@ -159,7 +176,7 @@ static bool Integer(HWND box,uint32_t& out,bool key=false){
     auto result=wcstoul(text.c_str(),&end,hex?16:10);
     if(end==text.c_str()||*end)return false;out=result;return true;
 }
-static bool ApplyDialog(){
+static bool ApplyDialog(bool saveNow=false){
     State next;next.enabled=SendMessageW(EnabledBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.invertX=SendMessageW(InvertXBox,BM_GETCHECK,0,0)==BST_CHECKED;next.invertY=SendMessageW(InvertYBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.yawAxis=uint32_t(SendMessageW(YawBox,CB_GETCURSEL,0,0));next.pitchAxis=uint32_t(SendMessageW(PitchBox,CB_GETCURSEL,0,0));
@@ -167,12 +184,23 @@ static bool ApplyDialog(){
     for(int i=0;i<5;++i)if(!Integer(Keys[i],next.keys[i],true))return false;
     float* numbers[]={&next.deadzone,&next.speed,&next.pitchLimit,&next.returnDelay,&next.returnSpeed};
     for(int i=0;i<5;++i){auto text=Text(Tuning[i]);wchar_t* end=nullptr;*numbers[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
-    std::lock_guard<std::mutex> lock(ControlMutex);
-    return Screen&&ScreenGeneration==DialogGeneration&&ControlSession.Apply(next);
+    if(!Valid(next))return false;
+    std::unique_lock<std::mutex> lock(ControlMutex);
+    if(ScreenGeneration!=DialogGeneration||(!Screen&&!DialogLive)||CurrentName()!=DialogProfile)return false;
+    if(saveNow) {
+        if(!DialogLive)return false;
+        auto profile=DialogProfile;
+        lock.unlock();
+        if(!WriteState(profile,next))return false;
+        lock.lock();
+        if(ScreenGeneration!=DialogGeneration||CurrentName()!=profile)return false;
+    }
+    return ControlSession.Apply(next);
 }
 static LRESULT CALLBACK WindowProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
     if(msg==WM_COMMAND){switch(LOWORD(wp)){
         case 1:if(ApplyDialog())DestroyWindow(h);else SetWindowTextW(Message,L"Invalid value or native controls screen closed. Check ranges and reopen if needed.");return 0;
+        case 4:if(ApplyDialog(true))DestroyWindow(h);else SetWindowTextW(Message,L"Cannot save yet. Save the profile in the game first, then reopen camera settings.");return 0;
         case 2:DestroyWindow(h);return 0;
         case 3:Populate(State{});return 0;
     }}
@@ -183,16 +211,18 @@ static LRESULT CALLBACK WindowProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){
 static void OpenDialog(){
     if(Dialog){SetForegroundWindow(Dialog);return;}
     State snapshot;
-    {std::lock_guard<std::mutex> lock(ControlMutex);if(!Screen)return;snapshot=ControlSession.active;DialogGeneration=ScreenGeneration;}
-    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Extended camera controls - active native input configuration",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,590,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    {std::lock_guard<std::mutex> lock(ControlMutex);if(!Screen&&!AllowLiveEditing)return;
+        DialogProfile=CurrentName();if(!CustomizationSave::ValidName(DialogProfile))return;
+        DialogLive=!Screen;snapshot=ControlSession.active;DialogGeneration=ScreenGeneration;}
+    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,590,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     EnabledBox=Child(L"BUTTON",L"Enable race 360 degree camera",BS_AUTOCHECKBOX,16,16,400,25);
-    Child(L"STATIC",L"Return to the game and accept its controls save confirmation after Apply.",0,16,48,770,25);
+    Child(L"STATIC",DialogLive?L"Apply changes now, or use Save and apply to keep them with this profile.":L"Return to the game and confirm your control changes after Apply.",0,16,48,770,25);
     Child(L"STATIC",L"Controller index (0..3)",0,16,85,180,24);ControllerBox=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,210,82,100,25);
     const wchar_t* axes[]={L"Unbound",L"Left stick X",L"Left stick Y",L"Right stick X",L"Right stick Y"};
     Child(L"STATIC",L"Orbit horizontal axis",0,16,123,180,24);YawBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,210,120,180,180);
     Child(L"STATIC",L"Orbit vertical axis",0,16,161,180,24);PitchBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,210,158,180,180);
     for(auto axis:axes){SendMessageW(YawBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(axis));SendMessageW(PitchBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(axis));}
-    Child(L"STATIC",L"Reset pad button mask",0,16,199,180,24);ResetBox=Child(L"EDIT",L"128",WS_BORDER|WS_TABSTOP,210,196,180,25);
+    Child(L"STATIC",L"Reset pad button mask",0,16,199,180,24);ResetBox=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,210,196,180,25);
     InvertXBox=Child(L"BUTTON",L"Invert horizontal",BS_AUTOCHECKBOX,16,234,185,25);InvertYBox=Child(L"BUTTON",L"Invert vertical",BS_AUTOCHECKBOX,210,234,180,25);
     const wchar_t* keyNames[]={L"Keyboard orbit left",L"Keyboard orbit right",L"Keyboard orbit up",L"Keyboard orbit down",L"Keyboard orbit reset"};
     const wchar_t* tuningNames[]={L"Deadzone (0..0.95)",L"Degrees/sec (1..720)",L"Pitch limit (0..80)",L"Return delay (-1..60)",L"Return speed (1..720)"};
@@ -200,7 +230,8 @@ static void OpenDialog(){
         int ty=285+i*33;Child(L"STATIC",tuningNames[i],0,16,ty,220,24);Tuning[i]=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,250,ty-3,140,25);}
     Child(L"STATIC",L"Keys: A..Z or Windows VK number/hex. 0 = unbound.\nArrows: left 0x25, up 0x26, right 0x27, down 0x28.\nPad reset: right thumb 128, left thumb 64, Back 32.\nBindings may overlap driving actions: choose unused inputs.",0,420,285,360,95);
     Message=Child(L"STATIC",L"Profile changes retain these settings unless the native input reader loads another configuration.",0,16,458,770,40);
-    Child(L"BUTTON",L"Apply to native session",WS_TABSTOP,330,510,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,510,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,510,120,30,3);
+    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,510,230,30,4);
+    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,510,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,510,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,510,120,30,3);
     Populate(snapshot);ShowWindow(Dialog,SW_SHOW);SetForegroundWindow(Dialog);
 }
 static DWORD WINAPI RunUI(void*){
@@ -208,7 +239,7 @@ static DWORD WINAPI RunUI(void*){
     wc.hCursor=LoadCursorW(nullptr,MAKEINTRESOURCEW(32512));wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_BTNFACE+1);RegisterClassW(&wc);
     bool previous=false;
     for(;;){MSG msg;while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE))if(!Dialog||!IsDialogMessageW(Dialog,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
-        bool key=(GetAsyncKeyState(VK_F7)&0x8000)!=0;if(key&&!previous&&Foreground())OpenDialog();previous=key;Sleep(20);}
+        bool key=(GetAsyncKeyState(OpenKey)&0x8000)!=0;if(key&&!previous&&Foreground())OpenDialog();previous=key;Sleep(20);}
 }
 
 using StreamFn=char*(__cdecl*)(void*,void*);
@@ -256,6 +287,16 @@ static void __fastcall Defaults(DWORD* screen,void*){
 static bool Install(){
     if(Installed)return true;
     if(!CustomizationSave::HooksReady)return false;
+    char path[MAX_PATH]{};HMODULE module=nullptr;
+    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(&Install),&module)&&GetModuleFileNameA(module,path,MAX_PATH)) {
+        if(char* slash=std::strrchr(path,'\\')) {
+            strcpy_s(slash+1,MAX_PATH-size_t(slash+1-path),"NFSMWCustomizationCamera.ini");
+            AllowLiveEditing=GetPrivateProfileIntA("ControlsEditor","AllowOutsideControls",0,path)!=0;
+            unsigned key=GetPrivateProfileIntA("ControlsEditor","Hotkey",VK_F7,path);
+            if(key>=1&&key<=255)OpenKey=key;
+        }
+    }
     struct Hook{uintptr_t at;void* replacement;void** original;std::vector<unsigned char> signature;};
     std::vector<Hook> hooks={
         {0x56E180,&Writer,reinterpret_cast<void**>(&OriginalWriter),{0x53,0x55,0x56,0x57,0xE8,0xE7,0x61,0x0C,0}},

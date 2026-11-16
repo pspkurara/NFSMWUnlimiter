@@ -59,7 +59,24 @@ static bool HooksReady = false, SaveCaptured = false;
 static void(__cdecl* RegisterEditor)(int(__cdecl*)(uint64_t,const Values*,int)) = nullptr;
 static void(__cdecl* SetOwnedContext)(uint64_t,const Values*) = nullptr;
 
-static void Log(const char* message) { OutputDebugStringA("[MWCL Save] "); OutputDebugStringA(message); OutputDebugStringA("\n"); }
+static void Log(const char* message) noexcept {
+    OutputDebugStringA("[MWCL Save] ");OutputDebugStringA(message);OutputDebugStringA("\n");
+    // Diagnostics must never interrupt a native save or leak a handle on allocation failure.
+    try {
+        wchar_t local[MAX_PATH]{};
+        const DWORD length=GetEnvironmentVariableW(L"LOCALAPPDATA",local,MAX_PATH);
+        if(!length||length>=MAX_PATH)return;
+        auto directory=std::filesystem::path(local)/L"NFSMWCustomizationLab";
+        const auto target=directory/L"save.log";
+        const std::string line=std::string(message)+"\r\n";
+        CreateDirectoryW(directory.c_str(),nullptr);
+        HANDLE file=CreateFileW(target.c_str(),FILE_APPEND_DATA,
+            FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file==INVALID_HANDLE_VALUE)return;
+        DWORD written=0;
+        WriteFile(file,line.data(),DWORD(line.size()),&written,nullptr);CloseHandle(file);
+    } catch(...) {}
+}
 static bool ValidName(const std::string& name) {
     return !name.empty() && name.size()<32 && name!="." && name!=".." &&
         name.find_first_of("\\/:*?\"<>|")==std::string::npos &&
@@ -70,11 +87,37 @@ static std::string Name(const char* text) {
     size_t count=strnlen_s(text,32);
     return count<32 ? std::string(text,count) : std::string();
 }
+static std::string CompletedProfileName(const char* filename) {
+    if(!filename)return {};
+    const size_t size=strnlen_s(filename,1024);
+    if(size==1024)return {};
+    // PC callbacks may identify the completed file by a full path.
+    std::string name(filename,size);
+    const auto slash=name.find_last_of("\\/");
+    if(slash!=std::string::npos)name.erase(0,slash+1);
+    return ValidName(name)?name:std::string();
+}
+// Resolve the two observed PC call forms without bypassing call-site redirects.
+static uintptr_t FolderCallTarget(const BYTE* call,uintptr_t imported) {
+    uint32_t operand=0;std::memcpy(&operand,call+2,sizeof(operand));
+    if(call[0]==0xFF&&call[1]==0x15&&operand==0x8902EC)return imported;
+    if(call[0]==0xE8&&call[5]==0x90) {
+        int32_t offset=0;std::memcpy(&offset,call+1,sizeof(offset));
+        return reinterpret_cast<uintptr_t>(call)+5+offset;
+    }
+    return 0;
+}
 static std::filesystem::path ProfileDirectory(const std::string& name) {
     if(!ValidName(name)) return {};
-    // Use the game's IAT, preserving save-directory redirection by other mods.
+    // Follow the call used by the game, including call-site save redirection.
     using FolderFn=HRESULT(WINAPI*)(HWND,int,HANDLE,DWORD,LPSTR);
+#ifdef MWCL_SAVE_TEST_ADDRESS
     auto folder=*reinterpret_cast<FolderFn*>(GlobalAddress(0x8902EC));
+#else
+    auto folder=reinterpret_cast<FolderFn>(FolderCallTarget(
+        reinterpret_cast<const BYTE*>(0x6CBF17),*reinterpret_cast<uintptr_t*>(0x8902EC)));
+    if(!folder){Log("Unknown native save-directory call; sidecar I/O disabled.");return {};}
+#endif
     char documents[MAX_PATH]{};
     if(!folder || FAILED(folder(nullptr,0x8005,nullptr,0,documents))) return {};
     const char* title=*reinterpret_cast<const char**>(GlobalAddress(0x901748));
@@ -321,11 +364,12 @@ static void __fastcall Save(DWORD* profile,void*,void* buffer,int size) {
     if(profile!=CurrentProfile()) return;
     std::lock_guard<std::mutex> lock(Mutex);
     EnsureProfileLocked();
-    if(buffer==NativeSaveBuffer()) {Saving=Pending;SavingProfile=Profile;SaveCaptured=true;}
+    if(buffer==NativeSaveBuffer()) {Saving=Pending;SavingProfile=Profile;SaveCaptured=true;Log("Native disk-save snapshot captured.");}
     else {if(Backups.size()>8) Backups.clear();Backups[buffer]={Profile,Pending};}
 }
 static void __fastcall Done(DWORD* callback,void*,const char* profile) {
-    std::string name=Name(profile);
+    std::string name=CompletedProfileName(profile);
+    Log(name.empty()?"Native SaveDone filename could not be identified.":"Native SaveDone received a profile filename.");
     OriginalDone(callback,profile);
     if(ValidName(name)) Commit(name);
     if(ValidName(name)&&ControlsDone) ControlsDone(name.c_str());

@@ -7,6 +7,7 @@ void require(bool b,const char* text){if(!b)throw std::runtime_error(text);}
 int main(){try{
     Session session;
     require(Valid(session.active),"valid defaults");
+    require(session.active.resetButtons==0,"defaults must not shadow native R3 camera-view action");
     session.Begin();auto next=session.active;next.enabled=1;next.keys[0]='J';
     require(session.Apply(next)&&session.Dirty(),"camera-only edit makes native controls dirty");
     session.Restore();require(!session.Dirty()&&!session.active.enabled,"native discard restores extension");
