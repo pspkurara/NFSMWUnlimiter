@@ -11,7 +11,7 @@ struct MenuInfo {
 };
 static_assert(sizeof(Values)==56&&sizeof(MenuInfo)==144,"Native stance ABI 1");
 struct Session {
-    MenuInfo info{};Values before{},active{};unsigned axle=0;bool enabled=false;
+    MenuInfo info{};Values before{},active{};unsigned axle=0,referenceAxle=0;bool enabled=false;
     bool Begin(const MenuInfo& settings,const Values& initial) {
         if(settings.size!=sizeof(MenuInfo)||settings.version!=1||!settings.token||settings.enabled>1||settings.baselineMask!=0xFFF||
            initial.size!=sizeof(Values)||(initial.mask&~0xFFFu))return false;
@@ -21,18 +21,28 @@ struct Session {
             for(unsigned a=0;a<2;++a)if(!std::isfinite(settings.inherited[c*2+a])||
                 ((initial.mask&(1u<<(c*2+a)))&&!std::isfinite(initial.values[c*2+a])))return false;
         }
-        info=settings;before=active=initial;axle=0;enabled=settings.enabled!=0;return true;
+        info=settings;before=active=initial;axle=referenceAxle=0;enabled=settings.enabled!=0;return true;
     }
     float Value(unsigned c,unsigned a) const {const auto i=c*2+a;return active.mask&(1u<<i)?active.values[i]:info.inherited[i];}
     bool Includes(unsigned a) const {return !axle||axle==a+1;}
-    bool Step(unsigned c,int direction) {
-        if(c>=6||(direction!=-1&&direction!=1))return false;
+    void SelectAxle(unsigned next) {if(next>2)return;axle=next;if(next)referenceAxle=next-1;}
+    bool Step(unsigned c,int direction,float multiplier=1) {
+        if(c>=6||(direction!=-1&&direction!=1)||!std::isfinite(multiplier)||multiplier<=0)return false;
+        const double next=double(Value(c,axle?axle-1:referenceAxle))+double(info.step[c])*direction*multiplier;
+        const float value=float(std::clamp(next,double(info.minimum[c]),double(info.maximum[c])));
         for(unsigned a=0;a<2;++a)if(Includes(a)) {
             const auto i=c*2+a;
-            active.values[i]=std::clamp(Value(c,a)+info.step[c]*direction,info.minimum[c],info.maximum[c]);
+            active.values[i]=value;
             active.mask|=1u<<i;
         }
         return true;
+    }
+    bool CopyToOther(unsigned c) {
+        if(c>=6||!axle||axle>2)return false;
+        const unsigned source=axle-1,target=c*2+(1-source);
+        // Copy the displayed absolute value, including an inherited source.
+        // Never clamp a copied saved value to a subsequently narrowed UI range.
+        active.values[target]=Value(c,source);active.mask|=1u<<target;return true;
     }
     void Inherit(unsigned c) {if(c<6)for(unsigned a=0;a<2;++a)if(Includes(a))active.mask&=~(1u<<(c*2+a));}
     bool Dirty() const {

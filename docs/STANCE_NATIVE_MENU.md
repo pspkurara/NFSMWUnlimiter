@@ -36,8 +36,23 @@ the extension category ID is never interpreted as a native selection ordinal.
 Seven native slider rows expose height, half-track, camber, complete wheel width,
 tire radius, brake inset and the global enabled flag. Left/right adjusts the
 selected row; the stock left/right trigger messages cycle both/front/rear axle.
-Button 5 restores inheritance for the selected channel. Both-axle adjustments
-add the same delta, preserving an existing front/rear difference.
+The header identifies both/front/rear. Button 5 (the stock Help/Y action)
+copies the selected channel from the active individual axle to the opposite axle;
+both-axle mode asks the user to select a source first. Button 4 restores inheritance.
+The controller's Button 4 mapping still needs live confirmation.
+
+Switching axle pages never changes values. In both-axle mode, editing a channel
+synchronizes only that channel, using the last selected individual axle as its
+reference (front on first entry). Other channels retain their individual settings.
+Copy uses the displayed absolute source, including inherited values, without
+rescaling it to newly narrowed editing ranges.
+
+Normal adjustment uses five channel steps; RB/Shift uses one and LB/Ctrl uses
+twenty. Fine takes precedence when both modifiers are held. These multipliers
+are configurable under `[StanceMenu]` in `NFSMWCustomizationCamera.ini`.
+An explicit geometry change or copy enables the live preview; Cancel restores
+the previous global flag and owned values. The separate enabled row can still
+turn the preview off. New controls, labels and preview behavior need runtime QA.
 
 Accept stages a free grouped owned-car adjustment. Back discards the preview.
 Native profile save commits the isolated owned-car sidecar later. The global

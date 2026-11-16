@@ -16,7 +16,7 @@ constexpr unsigned Category=0x8F1;
 constexpr const char* Package=CustomizationStanceAssets::Name;
 constexpr unsigned Pressed=0x0C407210,Accept=0x406415E3,Back=0x911AB364;
 constexpr unsigned Left=0x9120409E,Right=0xB5971BF1,PreviousAxle=0x5073EF13,NextAxle=0xD9FEEC59;
-constexpr unsigned Inherit=0xC519BFC4,ExitComplete=0xE1FDE1D1;
+constexpr unsigned Copy=0xC519BFC4,Inherit=0xC519BFC3,ExitComplete=0xE1FDE1D1;
 static bool Installed=false,Constructing=false,BuildRequested=false,Opening=false,Closing=false,Finished=false;
 static DWORD* Screen=nullptr;
 static unsigned NameHash=0,PackageHash=0,OpeningArgs=0,ReturnArgs=1,ReturnIndex=1;
@@ -66,7 +66,17 @@ static DrawFn OriginalDraw=nullptr;
 static ActFn OriginalAct=nullptr;
 static ReactFn OriginalReact=nullptr;
 
-static const char* Labels[]={"Height m","Half-track m","Camber deg","Width m","Radius m","Brake inset m"};
+static const char* Labels[]={"Height","Track","Camber","Width","Radius","Brake"};
+static float NormalStep=5,FineStep=1,FastStep=20;
+static float StepMultiplier() {
+    bool fine=(GetAsyncKeyState(VK_SHIFT)&0x8000)!=0,fast=(GetAsyncKeyState(VK_CONTROL)&0x8000)!=0;
+    XINPUT_STATE pad{};
+    if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS) {
+        fine|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_SHOULDER)!=0;
+        fast|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_LEFT_SHOULDER)!=0;
+    }
+    return fine?FineStep:fast?FastStep:NormalStep;
+}
 static bool Core() {
     if(Begin&&Control)return true;
     auto module=GetModuleHandleA("NFSMWCustomizationLab.asi");if(!module)return false;
@@ -130,9 +140,12 @@ static void Text(unsigned hash,const char* text) {
     if(auto object=FEngFindObject(Package,hash);object&&object[0]==0x89B05C){Remember(object);FEPrintf_obj(object,"%s",text);}
 }
 static void Heading(const char* error=nullptr) {
-    const char* modes[]={"Both axles (relative changes)","Front axle","Rear axle"};
-    // Avoid changing the shared package title; the native setting label is redrawn on entry.
-    Text(0x05CDDED4,error?error:modes[EditSession.axle]);
+    const char* modes[]={"STANCE: BOTH | RB FINE | LB FAST | Y COPY",
+        "STANCE: FRONT | RB FINE | LB FAST | Y COPY","STANCE: REAR | RB FINE | LB FAST | Y COPY"};
+    // These objects belong to our independent package clone. The race tuning
+    // package and its labels remain untouched and every edit is restored on exit.
+    Text(0x42ADB44C,error?error:modes[EditSession.axle]); // HEADERTEXT
+    Text(0x05CDDED4,"LT/RT: axle   X: inherit   Shift: fine   Ctrl: fast");
 }
 static void __fastcall Draw(DWORD* slider,void*) {
     const int index=SliderIndex(slider);
@@ -151,10 +164,10 @@ static void __fastcall Draw(DWORD* slider,void*) {
     else {
         const unsigned axle=EditSession.axle==2?1:0,i=unsigned(index)*2+axle;
         if(!EditSession.axle&&EditSession.Value(index,0)!=EditSession.Value(index,1))
-            sprintf_s(value,"%.4g / %.4g",double(EditSession.Value(index,0)),double(EditSession.Value(index,1)));
-        else sprintf_s(value,"%.4g%s",double(EditSession.Value(index,axle)),(EditSession.active.mask&(1u<<i))?"":" (inherit)");
+            sprintf_s(value,"%.3g/%.3g",double(EditSession.Value(index,0)),double(EditSession.Value(index,1)));
+        else sprintf_s(value,"%.4g%s",double(EditSession.Value(index,axle)),(EditSession.active.mask&(1u<<i))?"":"*");
     }
-    const char* label=index==6?"Stance overrides":Labels[index];
+    const char* label=index==6?"Enabled":Labels[index];
     // The stock tuning asset may omit OPTION_DATA_n. Its title is still a
     // complete usable row: include the absolute value there instead of rejecting it.
     FEPrintf_obj(title,separate?"%s":"%s: %s",label,value);
@@ -185,7 +198,12 @@ static void __fastcall Act(DWORD* slider,void*,const char* package,unsigned mess
     if(Closing||!Current()){Cancel();Leave();return;}
     if(message!=Left&&message!=Right)return;
     if(index==6)EditSession.enabled=message==Right;
-    else EditSession.Step(unsigned(index),message==Right?1:-1);
+    else {
+        EditSession.Step(unsigned(index),message==Right?1:-1,StepMultiplier());
+        // An explicit geometry adjustment must be visible even when the global
+        // feature was initially off. Cancel still restores the prior flag.
+        EditSession.enabled=true;
+    }
     if(Preview())Refresh();
 }
 static bool Commit() {
@@ -214,7 +232,14 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
         return;
     }
     if(message==PreviousAxle||message==NextAxle) {
-        EditSession.axle=(EditSession.axle+(message==NextAxle?1:2))%3;Refresh();return;
+        EditSession.SelectAxle((EditSession.axle+(message==NextAxle?1:2))%3);Refresh();return;
+    }
+    if(message==Copy) {
+        const int index=SliderIndex(reinterpret_cast<DWORD*>(screen[0x34/4]));
+        if(index>=0&&index<6&&EditSession.CopyToOther(unsigned(index))) {
+            EditSession.enabled=true;if(Preview())Refresh();
+        } else Heading("Select FRONT or REAR to copy this channel.");
+        return;
     }
     if(message==Inherit) {
         auto selected=reinterpret_cast<DWORD*>(screen[0x34/4]);const int index=SliderIndex(selected);
@@ -336,6 +361,10 @@ void AddPartsOption(DWORD* screen) {
 }
 static bool Install() {
     if(Installed)return true;
+    CustomizationCamera::Settings menuSettings;
+    NormalStep=CustomizationCamera::Number(menuSettings,"StanceMenu","StepMultiplier",5,.01f,1000);
+    FineStep=CustomizationCamera::Number(menuSettings,"StanceMenu","FineStepMultiplier",1,.01f,1000);
+    FastStep=CustomizationCamera::Number(menuSettings,"StanceMenu","FastStepMultiplier",20,.01f,1000);
     struct Hook {uintptr_t address;void* replacement;void** original;std::vector<BYTE> bytes;};
     const std::vector<Hook> hooks={
         {0x5A6060,&Setup,reinterpret_cast<void**>(&OriginalSetup),{0x6A,0xFF,0x68,0x78,0x37,0x87,0}},
