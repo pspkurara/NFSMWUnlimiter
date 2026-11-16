@@ -60,7 +60,7 @@ struct Context {
     const char* name{};
     unsigned body{},frontWheel{},rearWheel{};
     int kit{};
-    Matrix bodyWorld{},heightDelta{},drawRoot{};
+    Matrix heightWorld{},heightDelta{},drawRoot{};
     bool heightChanged{},rootCaptured{};
 };
 thread_local Context* current=nullptr;
@@ -200,13 +200,15 @@ Matrix* __fastcall CaptureBodyRoot(Matrix* destination,void*,const Matrix* sourc
     Matrix* result=reinterpret_cast<CopyMatrixFn>(0x445090)(destination,source);
     if(current&&!current->rootCaptured&&source) {
         Matrix inverse;
-        if(CustomizationMath::RigidInverse(*source,inverse)) {
-            current->bodyWorld=*source;
+        if(CustomizationMath::AffineInverse(*source,inverse)) {
+            // Cache the conjugated transform once per car/view. Every rigid or
+            // animated body part then needs only one matrix multiplication.
+            current->heightWorld=CustomizationMath::Multiply(CustomizationMath::Multiply(inverse,current->heightDelta),*source);
             current->drawRoot=current->heightChanged
                 ?CustomizationMath::Multiply(current->heightDelta,*source):*source;
             current->rootCaptured=true;
         } else {
-            // Retain all native geometry for scaled, non-affine or invalid roots.
+            // Retain native geometry for singular, non-affine or invalid roots.
             current->heightChanged=false;
         }
     }
@@ -218,7 +220,7 @@ void __fastcall BodyPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,v
         // Native render queues keep the matrix pointer. Allocate from the game's frame pool.
         auto allocate=reinterpret_cast<Matrix*(__cdecl*)(int)>(0x405ed0);
         if(auto copy=allocate(1)) {
-            *copy=CustomizationMath::MoveBodyPart(*matrix,current->bodyWorld,current->heightDelta);
+            *copy=CustomizationMath::Multiply(*matrix,current->heightWorld);
             transformed=copy;
         }
     }
@@ -231,7 +233,7 @@ void __fastcall DirectBody(void* view,void*,void* model,Matrix* matrix,void* lig
     if(current&&current->rootCaptured&&current->heightChanged&&matrix) {
         auto allocate=reinterpret_cast<Matrix*(__cdecl*)(int)>(0x405ed0);
         if(auto copy=allocate(1)) {
-            *copy=CustomizationMath::MoveBodyPart(*matrix,current->bodyWorld,current->heightDelta);
+            *copy=CustomizationMath::Multiply(*matrix,current->heightWorld);
             transformed=copy;
         }
     }
