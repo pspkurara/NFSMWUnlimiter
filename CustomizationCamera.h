@@ -38,6 +38,7 @@ namespace CustomizationCamera
     static bool NativeLookBackVerified = false;
     static bool NativeViewVerified = false;
     static bool NativeMouseVerified = false;
+    static bool NativeHeadingVerified = false;
     static DWORD(__stdcall* GetPadState)(DWORD, XINPUT_STATE*) = nullptr;
 
     // A separate ASI may supply normalized, already mapped stick input through
@@ -356,7 +357,7 @@ namespace CustomizationCamera
             Pitch = ApproachZero(Pitch, controls.returnSpeed * dt);
         }
         if(mouseActivity)LastOrbitInput=now;
-        if (Yaw == 0 && Pitch == 0 && Mouse.zoom == 1)
+        if (Yaw == 0 && Pitch == 0 && Mouse.zoom == 1 && !controls.vehicleHeading)
         {
             original(matrix, eye, look, up);
             return;
@@ -364,7 +365,12 @@ namespace CustomizationCamera
         const bool fixedEye=NativeViewVerified&&
             ((view.desired>=0&&view.desired<32&&(Config.fixedEyePovMask&(1u<<view.desired)))||
              (view.current>=0&&view.current<32&&(Config.fixedEyePovMask&(1u<<view.current))));
-        const CustomizationOrbit::Pose native={{eye->x,eye->y,eye->z},{look->x,look->y,look->z}};
+        CustomizationOrbit::Pose native={{eye->x,eye->y,eye->z},{look->x,look->y,look->z}};
+        if(controls.vehicleHeading&&NativeHeadingVerified&&view.anchor) {
+            const auto forward=reinterpret_cast<const Vec*>(view.anchor+0x50);
+            CustomizationOrbit::Pose aligned;
+            if(CustomizationOrbit::VehicleHeading(native,{forward->x,forward->y,forward->z},fixedEye,nativeBack,aligned))native=aligned;
+        }
         CustomizationOrbit::Pose rotated;
         if(!CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated,Mouse.zoom)) {
             original(matrix,eye,look,up);return;
@@ -458,6 +464,10 @@ namespace CustomizationCamera
         const unsigned char lookBackSetter[] = {0x8A,0x44,0x24,0x04,0x88,0x81,0xA1,0,0,0,0xC2,0x04,0};
         const unsigned char lookBackGetter[] = {0x8A,0x81,0xA1,0,0,0,0xF6,0xD8,0x1B,0xC0,0x25,0,0x80,0,0,0xC3};
         const unsigned char lookBackUpdate[] = {0x8A,0x86,0xA1,0,0,0,0x84,0xC0};
+        const unsigned char anchorMatrix[]={0x8D,0x46,0x50,0x57,0x50,0xE8,0x14,0xC0,0xFD,0xFF};
+        const unsigned char anchorRead[]={0x8B,0x8E,0x80,0,0,0};
+        NativeHeadingVerified=Matches(0x468FC2,anchorMatrix)&&Matches(0x47D41C,anchorRead);
+        if(!NativeHeadingVerified)Report("Vehicle heading layout not verified; vehicle-relative orbit disabled.");
         NativeLookBackVerified = Matches(0x4741A0,lookBackSetter) &&
             Matches(0x4741D0,lookBackGetter) && Matches(0x47D7ED,lookBackUpdate);
         if (Config.resetOnLookBack && !NativeLookBackVerified)

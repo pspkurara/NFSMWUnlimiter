@@ -35,7 +35,7 @@ static std::map<void*,Backup> Backups;
 static std::atomic<HWND> Dialog{nullptr};
 static HWND Message=nullptr;
 static HWND EnabledBox=nullptr,InvertXBox=nullptr,InvertYBox=nullptr,YawBox=nullptr,PitchBox=nullptr;
-static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=nullptr,MouseSpeedBox=nullptr,MouseZoomBox=nullptr;
+static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=nullptr,MouseSpeedBox=nullptr,MouseZoomBox=nullptr,HeadingBox=nullptr,MirrorBox=nullptr;
 static std::array<HWND,5> Keys{},Tuning{};
 static DWORD(WINAPI* PadState)(DWORD,XINPUT_STATE*)=nullptr;
 
@@ -83,7 +83,7 @@ static State LoadState(const std::string& name) {
         FileHeader header{};State candidate{},decoded{};
         stream.read(reinterpret_cast<char*>(&header),sizeof(header));
         if(!stream||std::memcmp(header.magic,"MWCLIN1",8)||header.version!=1||header.reserved||
-            (header.size!=sizeof(State)&&header.size!=Version2StateBytes&&header.size!=LegacyStateBytes))return state;
+            (header.size!=sizeof(State)&&header.size!=Version3StateBytes&&header.size!=Version2StateBytes&&header.size!=LegacyStateBytes))return state;
         stream.read(reinterpret_cast<char*>(&candidate),header.size);
         std::array<uint8_t,32> digest{};
         if(stream&&stream.peek()==EOF&&header.crc==CustomizationProfileStorage::Crc(&candidate,header.size)&&
@@ -174,6 +174,8 @@ static HWND Child(const wchar_t* type,const std::wstring& text,DWORD style,int x
     SendMessageW(result,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);return result;
 }
 static void Populate(const State& s){
+    SendMessageW(HeadingBox,BM_SETCHECK,s.vehicleHeading?BST_CHECKED:BST_UNCHECKED,0);
+    SendMessageW(MirrorBox,BM_SETCHECK,s.hideMirror?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(MouseBox,BM_SETCHECK,s.mouseEnabled?BST_CHECKED:BST_UNCHECKED,0);
     SetWindowTextW(MouseSpeedBox,Number(s.mouseSensitivity).c_str());SetWindowTextW(MouseZoomBox,Number(s.mouseZoomStep).c_str());
     SendMessageW(ModeBox,CB_SETCURSEL,s.orbitMode,0);
@@ -202,6 +204,8 @@ static bool ApplyDialog(bool saveNow=false){
     for(int i=0;i<5;++i)if(!Integer(Keys[i],next.keys[i],true))return false;
     float* numbers[]={&next.deadzone,&next.speed,&next.pitchLimit,&next.returnDelay,&next.returnSpeed};
     for(int i=0;i<5;++i){auto text=Text(Tuning[i]);wchar_t* end=nullptr;*numbers[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
+    next.vehicleHeading=SendMessageW(HeadingBox,BM_GETCHECK,0,0)==BST_CHECKED;
+    next.hideMirror=SendMessageW(MirrorBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.mouseEnabled=SendMessageW(MouseBox,BM_GETCHECK,0,0)==BST_CHECKED;
     HWND mouseBoxes[]={MouseSpeedBox,MouseZoomBox};float* mouseValues[]={&next.mouseSensitivity,&next.mouseZoomStep};
     for(int i=0;i<2;++i){auto text=Text(mouseBoxes[i]);wchar_t* end=nullptr;*mouseValues[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
@@ -235,7 +239,7 @@ static void OpenDialog(){
     {std::lock_guard<std::mutex> lock(ControlMutex);if(!Screen&&!AllowLiveEditing)return;
         DialogProfile=CurrentName();if(!CustomizationProfileStorage::ValidName(DialogProfile))return;
         DialogLive=!Screen;snapshot=ControlSession.active;DialogGeneration=ScreenGeneration;}
-    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,635,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,690,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     EnabledBox=Child(L"BUTTON",L"Enable race 360 degree camera",BS_AUTOCHECKBOX,16,16,400,25);
     Child(L"STATIC",DialogLive?L"Apply changes now, or use Save and apply to keep them with this profile.":L"Return to the game and confirm your control changes after Apply.",0,16,48,770,25);
     Child(L"STATIC",L"Controller index (0..3)",0,16,85,180,24);ControllerBox=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,210,82,100,25);
@@ -256,9 +260,12 @@ static void OpenDialog(){
     ModeBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,540,402,240,130);
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Rate orbit (UG2 style)"));
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Direction: release to center"));
-    Message=Child(L"STATIC",L"Direction mode uses both axes for horizontal direction; native look-back can run alongside it.",0,16,470,770,40);
-    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,550,230,30,4);
-    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,550,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,550,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,550,120,30,3);
+    HeadingBox=Child(L"BUTTON",L"Keep orbit relative to vehicle heading",BS_AUTOCHECKBOX,16,458,375,25);
+    MirrorBox=Child(L"BUTTON",L"Mirror auto-hide (integration pending)",BS_AUTOCHECKBOX,420,458,375,25);
+    EnableWindow(MirrorBox,FALSE);
+    Message=Child(L"STATIC",L"Direction mode uses both axes for horizontal direction; native look-back can run alongside it.",0,16,500,770,40);
+    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,595,230,30,4);
+    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,595,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,595,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,595,120,30,3);
     Populate(snapshot);ShowWindow(Dialog,SW_SHOW);SetForegroundWindow(Dialog);
 }
 static DWORD WINAPI RunUI(void*){

@@ -28,8 +28,16 @@ int main(){try{
     next.orbitMode=0;ApplyAxes(next,.5f,1,.1f,yaw,pitch);require(std::fabs(yaw-5)<.001f&&std::fabs(pitch-10)<.001f,"rate mode retains speed and vertical rotation");
     next.orbitMode=2;require(!Valid(next),"unknown orbit mode rejected");
     next=State{};next.version=1;next.speed=101;State migrated;
-    require(DecodeState(&next,LegacyStateBytes,migrated)&&migrated.version==3&&migrated.speed==101&&migrated.orbitMode==0,"legacy bindings preserve rate mode and tuning");
+    require(DecodeState(&next,LegacyStateBytes,migrated)&&migrated.version==4&&migrated.speed==101&&migrated.orbitMode==0,"legacy bindings preserve rate mode and tuning");
     require(!DecodeState(&next,sizeof(next),migrated),"old version cannot masquerade as new payload");
+    next=State{};next.version=3;next.mouseSensitivity=.7f;
+    require(DecodeState(&next,Version3StateBytes,migrated)&&migrated.version==4&&migrated.mouseSensitivity==.7f&&
+        !migrated.vehicleHeading&&!migrated.hideMirror,"version 3 retains tuning and leaves new behavior opt-in");
+    next=State{};next.vehicleHeading=2;require(!Valid(next),"unknown heading policy rejected");
+    next=State{};next.hideMirror=2;require(!Valid(next),"unknown mirror policy rejected");
+    session.Begin();next=State{};next.vehicleHeading=next.hideMirror=1;
+    require(session.Apply(next)&&session.Dirty(),"new camera policies participate in native controls confirmation");
+    session.Restore();require(!session.active.vehicleHeading&&!session.active.hideMirror,"discard restores camera policies");
     using namespace CustomizationOrbit;
     const Pose native={{1,2,3},{11,2,3}};Pose result;
     require(Rotate(native,90,0,true,result)&&result.eye.x==1&&result.eye.y==2&&result.eye.z==3&&
@@ -37,6 +45,16 @@ int main(){try{
     require(Rotate(native,90,0,false,result)&&result.look.x==11&&result.look.y==2&&result.look.z==3,
         "outside orbit retains native target");
     require(!Rotate({{0,0,0},{0,0,0}},90,0,true,result),"degenerate pose falls back to native camera");
+    const Pose drifting={{3,-4,2},{0,0,1}};
+    require(VehicleHeading(drifting,{1,0,0},false,false,result)&&std::fabs(result.eye.x+5)<.001f&&
+        result.eye.y==0&&result.eye.z==2&&result.look.z==1,"vehicle-relative chase bearing ignores native yaw lag, keeps height and distance");
+    require(VehicleHeading(drifting,{0,1,0},false,false,result)&&result.eye.x==0&&std::fabs(result.eye.y+5)<.001f,
+        "vehicle rotation changes the locked bearing without orbit accumulation");
+    require(VehicleHeading(drifting,{1,0,0},false,true,result)&&std::fabs(result.eye.x-5)<.001f,
+        "native look-back composes with the vehicle heading policy");
+    require(VehicleHeading(native,{0,1,0},true,false,result)&&result.eye.x==native.eye.x&&
+        std::fabs(result.look.y-12)<.001f,"fixed-eye vehicle bearing never relocates the driver camera");
+    require(!VehicleHeading(native,{0,0,1},false,false,result),"vertical or invalid heading falls back to native pose");
     next=State{};MouseOrbit mouse;yaw=pitch=0;
     require(!mouse.Update({1,true,100,100,120},next,false,yaw,pitch)&&yaw==0&&mouse.zoom==1,"first frame discards stale mouse deltas");
     require(mouse.Update({2,true,10,-10,120},next,false,yaw,pitch)&&std::fabs(yaw-3)<.001f&&std::fabs(pitch-3)<.001f&&mouse.zoom<1,"native drag and wheel rotate and zoom");

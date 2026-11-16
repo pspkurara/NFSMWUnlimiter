@@ -80,13 +80,11 @@ centers on native look-back or POV/anchor/lag changes by default. A view change
 waits for neutral input before another rate orbit so a held stick does not undo
 that change immediately.
 
-The current state version 3 appends mouse settings to the version-2 mode field
-and the 72-byte version-1 prefix. Loading either legacy size verifies its original
-length, CRC and native revision before migration. Version 1 retains Rate mode;
-version 2 retains its chosen mode. Existing bindings and tuning are preserved,
-with defaults for new mouse fields. Unknown payload versions and sizes are
-rejected. The next successful save writes the current 88-byte payload without
-altering native save bytes.
+The current state version 4 appends separate vehicle-heading and mirror policies.
+Legacy payloads (72-byte version 1, 76-byte version 2, 88-byte version 3) verify
+the original length, CRC and native revision before migration. Existing mode,
+bindings and tuning are preserved; newly introduced policies remain off. The next
+successful save writes the 96-byte state without changing native save bytes.
 
 ## Mouse orbit
 
@@ -112,3 +110,21 @@ First-person eye position stays fixed and wheel distance zoom has no visual
 effect there; changing first-person FOV needs a separate verified integration.
 Mouse rotation and zoom share the existing post-collision orbit limitation and
 still need in-game validation, including menus, pause, controllers and remappers.
+
+## Vehicle heading and mirror policies
+
+These are independent switches, separate from Rate/Direction mode and mouse input.
+`Keep orbit relative to vehicle heading` replaces native horizontal bearing with
+the raw CameraAnchor vehicle heading, including at neutral. Camera target,
+elevation and distance retain their native values; this removes yaw lag rather
+than rigidly welding the entire camera transform to the body. It does not add
+new collision avoidance after orbit rotation. First-person views retain their
+native eye. Standard look-back composes with the selected heading basis.
+
+`Deadzone (0..0.95)` already sets the stick response threshold (default 0.22).
+The radial live range is rescaled after the deadzone. Rate mode with return delay
+-1 holds the chosen angle; Direction mode returns to neutral when released.
+
+Native PC look-back uses the current POV's camera parameters, not a verified
+shared rear-only camera preset. A universal rear-view position/height/distance
+option is therefore not supplied.

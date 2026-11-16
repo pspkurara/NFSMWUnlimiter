@@ -4,6 +4,20 @@
 namespace CustomizationOrbit {
 struct Vec {float x,y,z;};
 struct Pose {Vec eye,look;};
+// Keep the native target, elevation and distance, replacing only horizontal
+// bearing with the vehicle's raw geometry heading (not its delayed camera yaw).
+inline bool VehicleHeading(const Pose& native,const Vec& forward,bool fixedEye,bool lookBack,Pose& result) {
+    const float length=std::hypot(forward.x,forward.y);
+    if(!std::isfinite(length)||length<.001f)return false;
+    const Vec center=fixedEye?native.eye:native.look;
+    const Vec endpoint=fixedEye?native.look:native.eye;
+    const float horizontal=std::hypot(endpoint.x-center.x,endpoint.y-center.y);
+    const float sign=(fixedEye?1.f:-1.f)*(lookBack?-1.f:1.f);
+    const Vec aligned={center.x+sign*horizontal*forward.x/length,
+        center.y+sign*horizontal*forward.y/length,endpoint.z};
+    if(!std::isfinite(aligned.x)||!std::isfinite(aligned.y)||!std::isfinite(aligned.z))return false;
+    result=fixedEye?Pose{center,aligned}:Pose{aligned,center};return true;
+}
 // Outside views orbit the native target. First-person views rotate about the
 // native eye so a long look-ahead distance cannot pull the camera out of the car.
 inline bool Rotate(const Pose& native,float yaw,float pitch,bool fixedEye,Pose& result,float zoom=1) {

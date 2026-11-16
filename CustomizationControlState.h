@@ -6,7 +6,7 @@
 namespace CustomizationControls {
 // POD file schema: no pointers, device GUIDs, profile pointers, or input samples.
 struct State {
-    uint32_t version=3, enabled=0, controller=0, yawAxis=3, pitchAxis=4;
+    uint32_t version=4, enabled=0, controller=0, yawAxis=3, pitchAxis=4;
     // R3 already changes the native camera view on common Xbox mappings.
     uint32_t resetButtons=0, invertX=0, invertY=0;
     uint32_t keys[5]{}; // left, right, up, down, reset; Windows VK, 0=unbound
@@ -14,12 +14,13 @@ struct State {
     uint32_t orbitMode=0; // 0 = rate orbit, 1 = stick direction (horizontal 360 degrees)
     uint32_t mouseEnabled=1;
     float mouseSensitivity=.3f,mouseZoomStep=.1f;
+    uint32_t vehicleHeading=0,hideMirror=0; // Opt-in; preserve existing profile behavior.
 };
-static_assert(sizeof(State)==88,"Controls sidecar state version 3");
-constexpr uint32_t LegacyStateBytes=72,Version2StateBytes=76;
+static_assert(sizeof(State)==96,"Controls sidecar state version 4");
+constexpr uint32_t LegacyStateBytes=72,Version2StateBytes=76,Version3StateBytes=88;
 inline bool Equal(const State& a,const State& b) { return std::memcmp(&a,&b,sizeof(State))==0; }
 inline bool Valid(const State& s) {
-    if(s.version!=3||s.mouseEnabled>1||s.orbitMode>1||s.enabled>1||s.controller>3||s.yawAxis>4||s.pitchAxis>4||
+    if(s.version!=4||s.vehicleHeading>1||s.hideMirror>1||s.mouseEnabled>1||s.orbitMode>1||s.enabled>1||s.controller>3||s.yawAxis>4||s.pitchAxis>4||
        s.invertX>1||s.invertY>1||(s.resetButtons&~0xF3FFu)) return false;
     for(auto key:s.keys) if(key>255) return false;
     return std::isfinite(s.mouseSensitivity)&&s.mouseSensitivity>=.01f&&s.mouseSensitivity<=10&&
@@ -32,16 +33,20 @@ inline bool Valid(const State& s) {
 }
 // Validate the old payload before adding defaults; file CRC covers its original bytes.
 inline bool DecodeState(const void* bytes,uint32_t size,State& output) {
-    if(size!=sizeof(State)&&size!=Version2StateBytes&&size!=LegacyStateBytes)return false;
+    if(size!=sizeof(State)&&size!=Version3StateBytes&&size!=Version2StateBytes&&size!=LegacyStateBytes)return false;
     State candidate;
     std::memcpy(&candidate,bytes,size);
     if(size==LegacyStateBytes) {
         if(candidate.version!=1)return false;
-        candidate.version=3;candidate.orbitMode=0;
+        candidate.version=4;candidate.orbitMode=0;
     }
     if(size==Version2StateBytes) {
         if(candidate.version!=2)return false;
-        candidate.version=3;
+        candidate.version=4;
+    }
+    if(size==Version3StateBytes) {
+        if(candidate.version!=3)return false;
+        candidate.version=4;
     }
     if(!Valid(candidate))return false;
     output=candidate;return true;
