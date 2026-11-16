@@ -30,3 +30,11 @@ Do not delete or rewrite the native save to uninstall this snapshot.
 
 Source archives and SHA256 payload hashes are included. The manifest records
 the exact source commits and explicitly marks native runtime QA incomplete.
+
+Optional installer: install_customization.ps1 -Snapshot <unpacked snapshot>
+-GamePath <game directory> -BackupRoot <your writable backup directory>.
+Normally exit the game first. Administrator rights may be needed for Program
+Files. The installer verifies the inspected executable and payload hashes, keeps
+existing INI settings, backs up replaced files, and writes a receipt. It changes
+only the five listed scripts files and does not touch saves, VRM or ExtraOptions.
+This is still an unfinished development snapshot. Stance and clipping ship off.

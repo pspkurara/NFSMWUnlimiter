@@ -62,6 +62,7 @@ def main():
     for source, target in payload:
         shutil.copy2(source, stage / 'scripts' / target)
     shutil.copy2(ROOT / 'distribution/README.txt', stage / 'README.txt')
+    shutil.copy2(ROOT / 'tools/install_customization.ps1', stage / 'install_customization.ps1')
     shutil.copytree(ROOT / 'docs', stage / 'docs')
     for file in ('CustomizationCamera.md', 'CustomizationClip.md', 'CustomizationControls.md'):
         shutil.copy2(ROOT / file, stage / 'docs' / file)
