@@ -1,6 +1,10 @@
 #pragma once
 #include "CustomizationControlState.h"
-#include "CustomizationSave.h"
+#include "CustomizationProfileStorage.h"
+#include <MinHook.h>
+#include <mutex>
+#include <map>
+#include <vector>
 #include <Xinput.h>
 #include <atomic>
 #include <sstream>
@@ -73,7 +77,7 @@ static_assert(sizeof(FileHeader)==56,"Controls file version 1");
 static State LoadState(const std::string& name) {
     State state{};
     try {
-        auto directory=CustomizationSave::ProfileDirectory(name);if(directory.empty())return state;
+        auto directory=CustomizationProfileStorage::ProfileDirectory(name);if(directory.empty())return state;
         std::ifstream stream(directory/L"NFSMWCustomizationControls.bin",std::ios::binary);
         FileHeader header{};State candidate{},decoded{};
         stream.read(reinterpret_cast<char*>(&header),sizeof(header));
@@ -81,10 +85,10 @@ static State LoadState(const std::string& name) {
             (header.size!=sizeof(State)&&header.size!=Version2StateBytes&&header.size!=LegacyStateBytes))return state;
         stream.read(reinterpret_cast<char*>(&candidate),header.size);
         std::array<uint8_t,32> digest{};
-        if(stream&&stream.peek()==EOF&&header.crc==CustomizationSave::Crc(&candidate,header.size)&&
+        if(stream&&stream.peek()==EOF&&header.crc==CustomizationProfileStorage::Crc(&candidate,header.size)&&
             DecodeState(&candidate,header.size,decoded)&&
-            CustomizationSave::Digest(directory/name,digest)&&!std::memcmp(header.digest,digest.data(),32))state=decoded;
-    }catch(...){CustomizationSave::Log("Input sidecar read failed; safe defaults selected.");}
+            CustomizationProfileStorage::Digest(directory/name,digest)&&!std::memcmp(header.digest,digest.data(),32))state=decoded;
+    }catch(...){CustomizationProfileStorage::Log("Input sidecar read failed; safe defaults selected.");}
     return state;
 }
 static void OnBeginSave(void* buffer,bool native) {
@@ -93,21 +97,21 @@ static void OnBeginSave(void* buffer,bool native) {
     if(native)SaveCaptured=false;else Backups.erase(buffer);
 }
 static void OnEndSave(void* buffer,bool native) {
-    if(!WroteInput){CustomizationSave::Log("Input writer not completed in this profile snapshot.");return;}
-    auto profile=CustomizationSave::CurrentProfile();if(!profile)return;
-    std::string name=CustomizationSave::Name(reinterpret_cast<const char*>(profile));
+    if(!WroteInput){CustomizationProfileStorage::Log("Input writer not completed in this profile snapshot.");return;}
+    auto profile=CustomizationProfileStorage::CurrentProfile();if(!profile)return;
+    std::string name=CustomizationProfileStorage::Name(reinterpret_cast<const char*>(profile));
     std::lock_guard<std::mutex> lock(ControlMutex);
-    if(native){Saving=WrittenState;SavingProfile=name;SaveCaptured=true;CustomizationSave::Log("Native disk-save input snapshot captured.");}
+    if(native){Saving=WrittenState;SavingProfile=name;SaveCaptured=true;CustomizationProfileStorage::Log("Native disk-save input snapshot captured.");}
     else {if(Backups.size()>8)Backups.clear();Backups[buffer]={name,WrittenState,WrittenInputCrc};}
 }
 static bool WriteState(const std::string& name,const State& snapshot) {
-    if(!Valid(snapshot)||!CustomizationSave::ValidName(name))return false;
+    if(!Valid(snapshot)||!CustomizationProfileStorage::ValidName(name))return false;
     std::lock_guard<std::mutex> fileLock(FileMutex);
     try {
-        auto directory=CustomizationSave::ProfileDirectory(name);if(directory.empty())return false;
+        auto directory=CustomizationProfileStorage::ProfileDirectory(name);if(directory.empty())return false;
         FileHeader header;std::array<uint8_t,32> digest{};
-        if(!CustomizationSave::Digest(directory/name,digest)){CustomizationSave::Log("Controls sidecar: completed native file not found at resolved directory.");return false;}
-        std::memcpy(header.digest,digest.data(),32);header.crc=CustomizationSave::Crc(&snapshot,sizeof(snapshot));
+        if(!CustomizationProfileStorage::Digest(directory/name,digest)){CustomizationProfileStorage::Log("Controls sidecar: completed native file not found at resolved directory.");return false;}
+        std::memcpy(header.digest,digest.data(),32);header.crc=CustomizationProfileStorage::Crc(&snapshot,sizeof(snapshot));
         auto target=directory/L"NFSMWCustomizationControls.bin",temp=directory/L"NFSMWCustomizationControls.bin.tmp";
         HANDLE file=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
         if(file==INVALID_HANDLE_VALUE)return false;
@@ -116,22 +120,22 @@ static bool WriteState(const std::string& name,const State& snapshot) {
             WriteFile(file,&snapshot,sizeof(snapshot),&bytes,nullptr)&&bytes==sizeof(snapshot)&&FlushFileBuffers(file);
         CloseHandle(file);
         std::array<uint8_t,32> currentDigest{};
-        ok=ok&&CustomizationSave::Digest(directory/name,currentDigest)&&currentDigest==digest;
+        ok=ok&&CustomizationProfileStorage::Digest(directory/name,currentDigest)&&currentDigest==digest;
         if(ok&&std::filesystem::exists(target))CopyFileW(target.c_str(),(directory/L"NFSMWCustomizationControls.bin.bak").c_str(),FALSE);
         ok=ok&&MoveFileExW(temp.c_str(),target.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH);
         if(!ok)DeleteFileW(temp.c_str());
-        else CustomizationSave::Log("Controls sidecar committed beside completed native save.");
+        else CustomizationProfileStorage::Log("Controls sidecar committed beside completed native save.");
         return ok;
-    }catch(...){CustomizationSave::Log("Input sidecar commit failed; native save untouched.");return false;}
+    }catch(...){CustomizationProfileStorage::Log("Input sidecar commit failed; native save untouched.");return false;}
 }
 static void OnSaveDone(const char* profile) {
-    State snapshot;std::string name=CustomizationSave::Name(profile);
+    State snapshot;std::string name=CustomizationProfileStorage::Name(profile);
     {std::lock_guard<std::mutex> lock(ControlMutex);if(!SaveCaptured||name!=SavingProfile)return;snapshot=Saving;SaveCaptured=false;}
     WriteState(name,snapshot);
 }
 static std::string CurrentName() {
-    auto profile=CustomizationSave::CurrentProfile();
-    return profile&&reinterpret_cast<const BYTE*>(profile)[32]?CustomizationSave::Name(reinterpret_cast<const char*>(profile)):std::string();
+    auto profile=CustomizationProfileStorage::CurrentProfile();
+    return profile&&reinterpret_cast<const BYTE*>(profile)[32]?CustomizationProfileStorage::Name(reinterpret_cast<const char*>(profile)):std::string();
 }
 static void OnBeginLoad() {ReadInput=false;ResetLoadedController=false;}
 static void OnEndLoad(const char* profile,void* buffer,bool native,bool,bool,int) {
@@ -139,7 +143,7 @@ static void OnEndLoad(const char* profile,void* buffer,bool native,bool,bool,int
     // its commit flag or later car validation. Follow the actual reader, even
     // for a temporary profile load, rather than leaving the two maps divergent.
     if(!ReadInput)return;
-    const std::string name=CustomizationSave::Name(profile);
+    const std::string name=CustomizationProfileStorage::Name(profile);
     State loaded;bool backupFound=false;
     {std::lock_guard<std::mutex> lock(ControlMutex);auto found=Backups.find(buffer);
         if(!native&&found!=Backups.end()&&found->second.profile==name&&found->second.inputCrc==ReadInputCrc){loaded=found->second.state;backupFound=true;}}
@@ -219,7 +223,7 @@ static void OpenDialog(){
     if(Dialog){SetForegroundWindow(Dialog);return;}
     State snapshot;
     {std::lock_guard<std::mutex> lock(ControlMutex);if(!Screen&&!AllowLiveEditing)return;
-        DialogProfile=CurrentName();if(!CustomizationSave::ValidName(DialogProfile))return;
+        DialogProfile=CurrentName();if(!CustomizationProfileStorage::ValidName(DialogProfile))return;
         DialogLive=!Screen;snapshot=ControlSession.active;DialogGeneration=ScreenGeneration;}
     Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,635,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     EnabledBox=Child(L"BUTTON",L"Enable race 360 degree camera",BS_AUTOCHECKBOX,16,16,400,25);
@@ -271,7 +275,7 @@ static bool CompleteStream(void* begin,void* end,char* result) {
 static char* __cdecl Writer(void* begin,void* end){
     WrittenState=Runtime();char* p=OriginalWriter(begin,end);
     WroteInput=CompleteStream(begin,end,p);
-    if(WroteInput)WrittenInputCrc=CustomizationSave::Crc(begin,NativeInputBytes);
+    if(WroteInput)WrittenInputCrc=CustomizationProfileStorage::Crc(begin,NativeInputBytes);
     return p;
 }
 static char* __cdecl Reader(void* begin,void* end){
@@ -279,7 +283,7 @@ static char* __cdecl Reader(void* begin,void* end){
     if(uintptr_t(end)>=uintptr_t(begin)&&uintptr_t(end)-uintptr_t(begin)>=4)std::memcpy(&savedDevice,begin,4);
     char* p=OriginalReader(begin,end);ReadInput=CompleteStream(begin,end,p);
     if(ReadInput) {
-        ReadInputCrc=CustomizationSave::Crc(begin,NativeInputBytes);
+        ReadInputCrc=CustomizationProfileStorage::Crc(begin,NativeInputBytes);
         auto manager=reinterpret_cast<DWORD*(__cdecl*)()>(0x634370)();
         auto currentDevice=reinterpret_cast<uint32_t(__thiscall*)(DWORD*,int)>(0x634DA0)(reinterpret_cast<DWORD*>(manager[2]),3);
         ResetLoadedController=currentDevice&&currentDevice!=savedDevice;
@@ -297,9 +301,9 @@ static void __fastcall Defaults(DWORD* screen,void*){
     OriginalDefaults(screen);std::lock_guard<std::mutex> lock(ControlMutex);
     if(screen==Screen)ResetDevice(ControlSession.active,controller);
 }
-static bool Install(){
+static bool Install(bool nativeLifecycleReady){
     if(Installed)return true;
-    if(!CustomizationSave::HooksReady)return false;
+    if(!nativeLifecycleReady)return false;
     char path[MAX_PATH]{};HMODULE module=nullptr;
     if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCSTR>(&Install),&module)&&GetModuleFileNameA(module,path,MAX_PATH)) {
@@ -320,7 +324,7 @@ static bool Install(){
         {0x51D590,&Restore,reinterpret_cast<void**>(&OriginalRestore),{0x83,0xEC,8,0x53,0x55,0x8B,0xE9}},
         {0x51D6E0,&Defaults,reinterpret_cast<void**>(&OriginalDefaults),{0x56,0x57,0x8B,0xF9,0xE8,0x87,0x6C,0x11,0}}
     };
-    for(const auto& hook:hooks)if(std::memcmp(reinterpret_cast<void*>(hook.at),hook.signature.data(),hook.signature.size())){CustomizationSave::Log("Controls extension disabled: executable/hook signature mismatch.");return false;}
+    for(const auto& hook:hooks)if(std::memcmp(reinterpret_cast<void*>(hook.at),hook.signature.data(),hook.signature.size())){CustomizationProfileStorage::Log("Controls extension disabled: executable/hook signature mismatch.");return false;}
     auto initialized=MH_Initialize();if(initialized!=MH_OK&&initialized!=MH_ERROR_ALREADY_INITIALIZED)return false;
     size_t created=0;for(auto& hook:hooks){if(MH_CreateHook(reinterpret_cast<void*>(hook.at),hook.replacement,hook.original)!=MH_OK)break;++created;}
     if(created==hooks.size()){
@@ -329,9 +333,7 @@ static bool Install(){
             HMODULE xinput=LoadLibraryExW(L"xinput1_4.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);if(!xinput)xinput=LoadLibraryExW(L"xinput9_1_0.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
             if(xinput)PadState=reinterpret_cast<decltype(PadState)>(GetProcAddress(xinput,"XInputGetState"));
             Installed=true;if(auto thread=CreateThread(nullptr,0,RunUI,nullptr,0,nullptr))CloseHandle(thread);
-            CustomizationSave::ControlsBeginSave=&OnBeginSave;CustomizationSave::ControlsEndSave=&OnEndSave;
-            CustomizationSave::ControlsDone=&OnSaveDone;CustomizationSave::ControlsBeginLoad=&OnBeginLoad;CustomizationSave::ControlsEndLoad=&OnEndLoad;
-            CustomizationSave::Log("Native controls lifecycle extension installed. F7 opens orbit bindings from PC Controls.");return true;
+            CustomizationProfileStorage::Log("Native controls lifecycle extension installed. F7 opens orbit bindings from PC Controls.");return true;
         }
     }
     for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].at));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].at));}return false;

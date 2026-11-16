@@ -24,17 +24,23 @@ this plan does not silently switch existing users to a different storage mode.
 | Attachment navigation conflict and driver-part preview | Part-menu integration, kept with the matching Unlimiter fork where needed |
 | Owned-car stance and visual geometry | Owned-car identity and rendering adapter in the matching fork |
 
-Factor profile path resolution, validation and atomic file operations into shared
-source, not an extra mandatory ASI. Owned-car identity tables must stay outside
+Profile path resolution, name validation, CRC/native hash and current-profile
+lookup are now shared source in `CustomizationProfileStorage.h`; this layer
+includes no car records, editor ABI, MinHook or Unlimiter runtime. Controls use
+this layer directly for file identity. Atomic file replacement remains owned by
+each extension's writer. Do not add an extra mandatory ASI for these helpers. Owned-car identity tables must stay outside
 camera storage. Native save/load hook ownership must be coordinated when the
 camera and customization products coexist: use one versioned registration path,
 validate the owner, and fail safely on unknown competing patches. Do not install
 two independent unconditional patches over the same native entry point.
 
-The current prototype still obtains controls lifecycle callbacks from
-`CustomizationSave` and still builds driving orbit into the fork. Extracting it
-requires removing this concrete dependency and verifying both solo and combined
-installations before calling the camera independent.
+The controls header now builds without `CustomizationSave`: it receives native
+lifecycle readiness from its host and exposes the five transaction callbacks.
+The sidecar integration fixture includes controls directly without the owned-car
+adapter. The fork currently wires those callbacks to its save hooks and still
+builds driving orbit into the fork. A standalone native host and coordinated
+hook ownership still need implementation and solo/combined runtime verification
+before calling the camera an independent installed product.
 
 ## Camera contexts
 

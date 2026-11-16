@@ -55,8 +55,10 @@ An unknown or reused temporary buffer selects defaults rather than borrowing
 the on-disk profile's unrelated settings. Native device-ID mismatch resets the
 extension's controller bindings along with the native controller defaults.
 
-The bridge into CustomizationSave is five lifecycle callbacks installed by
-`CustomizationControls::Install`: BeginSave, EndSave, Done, BeginLoad, EndLoad.
+The host connects five lifecycle callbacks after `CustomizationControls::Install`
+receives a successful native-lifecycle status: BeginSave, EndSave, Done,
+BeginLoad and EndLoad. The controls implementation itself does not include
+CustomizationSave or owned-car tables. The fork currently supplies the host.
 They must run around the actual original native SaveToBuffer/LoadFromBuffer,
 and Done must run after confirmed native disk-save success. Rendering and the
 dialog share a mutex for active state; no sidecar I/O runs under this mutex.

@@ -7,7 +7,7 @@ static uintptr_t FixtureAddress(uintptr_t address) {return fixtureBase+address-0
 #include <stdexcept>
 namespace fs=std::filesystem;
 namespace C=CustomizationControls;
-namespace S=CustomizationSave;
+namespace S=CustomizationProfileStorage;
 static fs::path directory;
 static void Require(bool ok,const char* why) {if(!ok)throw std::runtime_error(why);}
 static HRESULT WINAPI Folder(HWND,int,HANDLE,DWORD,char* path) {
