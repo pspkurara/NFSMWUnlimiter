@@ -51,6 +51,11 @@ int main() {
     Rides[ride.data()]={key,Fingerprint(ride.data())};
     Check(Resolve(ride.data(),0,2,0)==-2.5f,"Known owned ride resolves");
     auto ai=ride;Check(Resolve(ai.data(),0,2,0)==0,"Unknown identical AI remains native");
+    Check(TrackRideCopy(ride.data(),ai.data())&&Resolve(ai.data(),0,2,0)==-2.5f,
+        "observed menu/loader RideInfo copy inherits stance before opening customization");
+    std::vector<DWORD> unknown=ride;
+    Check(!TrackRideCopy(unknown.data(),ai.data())&&Resolve(ai.data(),0,2,0)==0,
+        "menu allocation reuse with an unknown source drops old ownership");
     auto customization=reinterpret_cast<BYTE*>(stable)+0xFA0+0x198;
     customization[0x194]=1;
     Check(BindRaceCustomization(ai.data(),customization,0)&&Resolve(ai.data(),0,2,0)==-2.5f,
@@ -59,6 +64,10 @@ int main() {
         "AI usage and reused RideInfo allocation discard owned stance");
     std::array<BYTE,0x198> copied{};std::memcpy(copied.data(),customization,copied.size());
     Check(!BindRaceCustomization(ai.data(),copied.data(),0),"copied equipment or handle alone cannot prove ownership");
+    TrackCustomizationCopy(customization,copied.data());
+    Check(BindRaceCustomization(ai.data(),copied.data(),0),"observed native deep copy preserves exact owned lineage");
+    copied[0]^=1;
+    Check(!BindRaceCustomization(ai.data(),copied.data(),0),"changed/reused customization copy loses old lineage");
     stable[5]=8;stable[8]=2;reinterpret_cast<BYTE*>(stable+5)[16]=1;
     Check(!BindRaceCustomization(ai.data(),customization,0),"ambiguous customization ownership fails closed");
     stable[5]=0xffffffff;

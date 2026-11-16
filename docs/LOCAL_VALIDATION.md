@@ -72,7 +72,9 @@ companion-only hotfix was backed up and installed in the original game.
 
 The fork now binds racing RideInfo at VehicleRenderConn::Load, using local-player
 usage 0 and the exact customization-record address within the active profile.
-No equipment match or copied handle is used as ownership proof. Unknown copies,
+The PVehicle 0x198-byte deep-copy site propagates observed source ownership to
+the allocated destination, guarded by part/handle fingerprint and active-profile
+identity. No equipment match or copied handle alone proves ownership. Unknown copies,
 AI usage and ambiguous records remain native. Fixtures cover these exclusions.
 
 A guarded UpdateTires adapter changes temporary lateral positions and render
@@ -90,3 +92,10 @@ configurable price (default zero) are not implemented yet. The temporary editor
 is debug-only and disabled until deliberately opted in. Vehicle-heading camera
 basis is implemented with legacy-state migration; mirror auto-hide remains
 pending and its new checkbox is disabled rather than pretending it works.
+
+Frontend ReInit (also used by its constructor) and LoadedRideInfo's native copy
+now propagate known RideInfo ownership. Allocation reuse drops stale associations;
+unknown equal-equipment cars cannot borrow the selected global frontend record
+in the value resolver. Cached menus read current owned values every render rather
+than capturing stance at instance creation. Copy provenance is covered by fixtures;
+real menu transitions still require in-game confirmation.

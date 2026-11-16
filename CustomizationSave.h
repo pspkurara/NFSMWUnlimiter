@@ -56,6 +56,7 @@ using State = std::map<Key, Values>;
 static std::mutex Mutex;
 static State Pending, Preview, Saving;
 static std::map<const DWORD*,Binding> Rides;
+static std::map<const void*,Binding> CustomizationCopies;
 static std::map<Key,uint64_t> Tokens;
 static uint64_t NextToken = 1;
 static uint64_t ActiveEditorToken = 0;
@@ -95,7 +96,7 @@ static bool CurrentKey(const Key& key) {
     return false;
 }
 static void LoadLocked(const std::string& name) {
-    Profile=name; Pending.clear();Preview.clear();Rides.clear();Tokens.clear();ActiveEditorToken=0;
+    Profile=name; Pending.clear();Preview.clear();Rides.clear();CustomizationCopies.clear();Tokens.clear();ActiveEditorToken=0;
     Saving.clear();SaveCaptured=false;SavingProfile.clear();
     try {
         auto directory=ProfileDirectory(name); if(directory.empty()) return;
@@ -141,22 +142,22 @@ static uint64_t Fingerprint(const DWORD* ride) {
     return hash;
 }
 static bool IdentityLocked(DWORD* ride,Key& key,bool editor) {
-    if(!ride) return false;
-    if(*reinterpret_cast<int*>(GlobalAddress(0x925E90))==3) {
-        auto record=*reinterpret_cast<DWORD**>(GlobalAddress(0x9B9EC4));
-        auto stable=Stable();
-        uintptr_t at=reinterpret_cast<uintptr_t>(record), first=reinterpret_cast<uintptr_t>(stable);
-        if(stable && at>=first && at<first+200*20 && (at-first)%20==0 && ReadKey(record,key) &&
-           reinterpret_cast<int(__thiscall*)(const DWORD*)>(0x5816B0)(record)==int(ride[0])) return true;
-        if(editor) return false;
-    }
-    uint64_t fingerprint=Fingerprint(ride);
+    if(!ride)return false;
     auto found=Rides.find(ride);
-    if(found!=Rides.end() && found->second.fingerprint==fingerprint && CurrentKey(found->second.key)) {
+    if(found!=Rides.end()&&found->second.fingerprint==Fingerprint(ride)&&CurrentKey(found->second.key)) {
         key=found->second.key;return true;
     }
-    // An AI can have identical equipment. Content equality cannot prove ownership.
-    // Unknown RideInfo copies remain native until their copy lineage is verified.
+    // Only the active editor may establish a selected frontend record. Rendering
+    // other cached cars must not borrow that global selection, even for one type.
+    if(editor&&*reinterpret_cast<int*>(GlobalAddress(0x925E90))==3) {
+        auto record=*reinterpret_cast<DWORD**>(GlobalAddress(0x9B9EC4));
+        auto stable=Stable();
+        uintptr_t at=reinterpret_cast<uintptr_t>(record),first=reinterpret_cast<uintptr_t>(stable);
+        if(stable&&at>=first&&at<first+200*20&&(at-first)%20==0&&ReadKey(record,key)&&
+           reinterpret_cast<int(__thiscall*)(const DWORD*)>(0x5816B0)(record)==int(ride[0])) {
+            Rides[ride]={key,Fingerprint(ride)};return true;
+        }
+    }
     return false;
 }
 static int __cdecl Edit(uint64_t token,const Values* values,int action) {
@@ -268,7 +269,7 @@ static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t
     const std::string name=Name(profile);
     auto backup=Backups.find(buffer);
     if(!native&&backup!=Backups.end()&&backup->second.profile==name) {
-        Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();
+        Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();CustomizationCopies.clear();
     } else {LoadLocked(name);Backups.clear();}
 }
 static const CustomizationProfileHost::Observer OwnedObserver={sizeof(CustomizationProfileHost::Observer),1,0x4F574E44,nullptr,
@@ -285,26 +286,89 @@ static void __fastcall Build(DWORD* stable,void*,uint32_t handle,int player,DWOR
 // Racing creates a fresh RideInfo from the original frontend customization
 // record, bypassing BuildRideForPlayer. Bind only the local-player usage and
 // exact active-profile record address; matching equipment is never ownership.
+static bool TrackRideCopy(DWORD* source,DWORD* destination) {
+    if(!destination)return false;
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    Binding binding{};bool known=false;
+    auto found=Rides.find(source);
+    if(source&&found!=Rides.end()&&CurrentKey(found->second.key)&&found->second.fingerprint==Fingerprint(source)) {
+        binding=found->second;known=true;
+    }
+    Rides.erase(destination);
+    if(known) {if(Rides.size()>512)Rides.clear();Rides[destination]=binding;}
+    return known;
+}
+using ReInitFn=void(__thiscall*)(DWORD*,DWORD*);
+using LoadedRideFn=DWORD*(__thiscall*)(DWORD*,DWORD*,int,int,int);
+static ReInitFn OriginalReInit=nullptr;
+static LoadedRideFn OriginalLoadedRide=nullptr;
+static void __fastcall ReInit(DWORD* car,void*,DWORD* ride) {
+    // Both first construction and later menu refresh pass through ReInit.
+    TrackRideCopy(ride,car+8/4);
+    OriginalReInit(car,ride);
+}
+static DWORD* __fastcall LoadedRide(DWORD* loaded,void*,DWORD* ride,int frontend,int twoPlayers,int player) {
+    TrackRideCopy(ride,loaded+0x1C/4);
+    return OriginalLoadedRide(loaded,ride,frontend,twoPlayers,player);
+}
+static uint64_t CustomizationFingerprint(const void* record) {
+    // Parts and record handle stay stable when native race tuning changes.
+    return (uint64_t(Crc(record,139*2))<<8)|reinterpret_cast<const BYTE*>(record)[0x194];
+}
+static bool CustomizationOwnerLocked(const void* customization,Key& owner) {
+    auto stable=Stable();if(!stable||!customization)return false;
+    const uintptr_t first=reinterpret_cast<uintptr_t>(stable)+0xFA0;
+    const uintptr_t address=reinterpret_cast<uintptr_t>(customization);
+    if(address>=first&&address<first+76*0x198&&(address-first)%0x198==0) {
+        const unsigned index=unsigned((address-first)/0x198);
+        if(reinterpret_cast<const BYTE*>(customization)[0x194]!=index)return false;
+        bool found=false;
+        for(int i=0;i<200;++i) {
+            Key candidate;
+            if(ReadKey(stable+i*5,candidate)&&candidate.customization==index) {
+                if(found)return false;
+                owner=candidate;found=true;
+            }
+        }
+        return found;
+    }
+    auto copy=CustomizationCopies.find(customization);
+    if(copy==CustomizationCopies.end()||!CurrentKey(copy->second.key)||
+       copy->second.fingerprint!=CustomizationFingerprint(customization))return false;
+    owner=copy->second.key;return true;
+}
+static void __cdecl TrackCustomizationCopy(const void* source,void* destination) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+        CustomizationCopies.erase(destination);
+        Key key;
+        if(destination&&CustomizationOwnerLocked(source,key)) {
+            if(CustomizationCopies.size()>512)CustomizationCopies.clear();
+            CustomizationCopies[destination]={key,CustomizationFingerprint(source)};
+        }
+    } catch(...) {Log("Customization copy lineage unavailable; native copy retained.");}
+}
+static void* OriginalCustomizationCopy=nullptr;
+static void __declspec(naked) CustomizationCopyCave() {
+    __asm {
+        // PVehicle's verified 0x198-byte deep copy: ESI source, EAX allocation.
+        pushfd
+        pushad
+        push eax
+        push esi
+        call TrackCustomizationCopy
+        add esp,8
+        popad
+        popfd
+        jmp dword ptr [OriginalCustomizationCopy]
+    }
+}
 static bool BindRaceCustomization(DWORD* ride,const void* customization,int usage) {
     if(!ride)return false;
     std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
     Rides.erase(ride); // Reused allocations must not retain an old owner.
-    auto stable=Stable();
-    if(usage!=0||!stable||!customization)return false;
-    const uintptr_t first=reinterpret_cast<uintptr_t>(stable)+0xFA0;
-    const uintptr_t address=reinterpret_cast<uintptr_t>(customization);
-    if(address<first||address>=first+76*0x198||(address-first)%0x198)return false;
-    const unsigned index=unsigned((address-first)/0x198);
-    if(reinterpret_cast<const BYTE*>(customization)[0x194]!=index)return false;
-    Key owner{};bool found=false;
-    for(int i=0;i<200;++i) {
-        Key candidate;
-        if(ReadKey(stable+i*5,candidate)&&candidate.customization==index) {
-            if(found)return false; // A corrupt/ambiguous stable is not safe to inherit.
-            owner=candidate;found=true;
-        }
-    }
-    if(!found)return false;
+    Key owner{};
+    if(usage!=0||!CustomizationOwnerLocked(customization,owner))return false;
     if(Rides.size()>512)Rides.clear();
     Rides[ride]={owner,Fingerprint(ride)};return true;
 }
@@ -322,6 +386,8 @@ static DWORD* __fastcall NewCar(DWORD* stable,void*) {
         auto remove=[&](auto& table){for(auto it=table.begin();it!=table.end();) if(it->first.handle==record[0]) it=table.erase(it);else ++it;};
         remove(Pending);remove(Preview);remove(Tokens);
         for(auto it=Rides.begin();it!=Rides.end();) if(it->second.key.handle==record[0]) it=Rides.erase(it);else ++it;
+        for(auto it=CustomizationCopies.begin();it!=CustomizationCopies.end();)
+            if(it->second.key.handle==record[0])it=CustomizationCopies.erase(it);else ++it;
     }
     return record;
 }
@@ -332,7 +398,10 @@ static bool Install() {
     std::vector<Hook> hooks={
         {0x5910E0,&Build,reinterpret_cast<void**>(&OriginalBuild),{0x8B,0x54,0x24,4,0x53,0x57}},
         {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}},
-        {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}}
+        {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}},
+        {0x689361,&CustomizationCopyCave,&OriginalCustomizationCopy,{0xB9,0x66,0,0,0,0x8B,0xF8,0xF3,0xA5}},
+        {0x7609B0,&ReInit,reinterpret_cast<void**>(&OriginalReInit),{0x64,0xA1,0,0,0,0}},
+        {0x752D20,&LoadedRide,reinterpret_cast<void**>(&OriginalLoadedRide),{0x8B,0x44,0x24,0x0C,0x53,0x55}}
     };
     for(const auto& hook:hooks) if(std::memcmp(reinterpret_cast<void*>(hook.address),hook.bytes.data(),hook.bytes.size())) {
         Log("Save extension disabled: unknown executable or competing hook.");return false;
