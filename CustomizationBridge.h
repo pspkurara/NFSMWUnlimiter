@@ -1,5 +1,6 @@
 #pragma once
 #include "CustomizationMath.h"
+#include "CustomizationRaceMath.h"
 #include "CustomizationClip.h"
 #include <MinHook.h>
 #include <algorithm>
@@ -73,22 +74,77 @@ float Value(const Context& c,int axle,int channel,float original) {
     // Defense at the process boundary even when another companion implements the ABI.
     return std::isfinite(value)?value:original;
 }
+static Context CarContext(DWORD* car) {
+    Context context{};context.car=car;
+    auto ride=reinterpret_cast<DWORD*>(car[33]);
+    context.name=GetCarTypeName(ride[0]);context.body=PartHash(ride,23);
+    if(auto part=RideInfo_GetPart(ride,23))context.kit=CarPart_GetAppliedAttributeIParam(part,bStringHash("KITNUMBER"),0);
+    context.frontWheel=PartHash(ride,66);context.rearWheel=PartHash(ride,67);
+    if(!context.rearWheel)context.rearWheel=context.frontWheel;
+    return context;
+}
+struct TireEffects {DWORD* connection;float skidScale[4]{1,1,1,1};};
+static thread_local TireEffects* activeEffects=nullptr;
+using UpdateTiresFn=void(__thiscall*)(DWORD*,float,float,const void*);
+using SkidsFn=void(__thiscall*)(void*,float,const void*,const void*,const void*,float);
+static UpdateTiresFn originalUpdateTires=nullptr;
+static SkidsFn originalSkids=nullptr;
+static void __fastcall Skids(void* state,void*,float intensity,const void* delta,const void* tire,const void* body,float width) {
+    if(activeEffects)for(unsigned i=0;i<4;++i)
+        if(reinterpret_cast<void*>(activeEffects->connection[0x74/4+i])==state) {width*=activeEffects->skidScale[i];break;}
+    originalSkids(state,intensity,delta,tire,body,width);
+}
+static void __fastcall UpdateTires(DWORD* connection,void*,float dt,float speed,const void* data) {
+    auto car=reinterpret_cast<DWORD*>(connection[0x44/4]);
+    if(!Ready()||!enabled()||!car||!car[33]) {originalUpdateTires(connection,dt,speed,data);return;}
+    const auto context=CarContext(car);
+    // PC layout verified independently: positions +90, radii +D0, TireState* +74.
+    float* positions=reinterpret_cast<float*>(connection+0x90/4);
+    float* radii=reinterpret_cast<float*>(connection+0xD0/4);
+    float snapshot[20];std::memcpy(snapshot,positions,sizeof(snapshot));
+    const auto offsets=reinterpret_cast<const float*>(car+68),widths=reinterpret_cast<const float*>(car+72);
+    const auto modelRadii=reinterpret_cast<const float*>(car+74),widthScale=reinterpret_cast<const float*>(car+76);
+    const auto radiusScale=reinterpret_cast<const float*>(car+80);
+    TireEffects effects{connection};
+    for(int i=0;i<4;++i) {
+        const int axle=i/2;
+        const CustomizationRace::Wheel before={offsets[i],widths[axle]*widthScale[i],modelRadii[axle]*radiusScale[i]};
+        const CustomizationRace::Wheel after={std::copysign(Value(context,axle,1,std::fabs(before.offset)),before.offset),
+            Value(context,axle,3,before.width),Value(context,axle,4,before.radius)};
+        CustomizationRace::Adjustment adjustment;
+        if(CustomizationRace::Adjust(positions[i*4+1],radii[i],before,after,adjustment)) {
+            positions[i*4+1]=adjustment.positionY;radii[i]=adjustment.radius;effects.skidScale[i]=adjustment.skidScale;
+        }
+    }
+    auto previous=activeEffects;activeEffects=&effects;
+    // Native UpdateTires creates both wheel matrices and world contact/FX points.
+    originalUpdateTires(connection,dt,speed,data);
+    activeEffects=previous;std::memcpy(positions,snapshot,sizeof(snapshot));
+}
+static bool InstallTireEffects() {
+    const unsigned char update[]={0x55,0x8B,0xEC,0x83,0xE4,0xF0,0x83,0xEC,0x64};
+    const unsigned char skid[]={0x55,0x8B,0xEC,0x83,0xE4,0xF0,0x81,0xEC,0xB4,0,0,0};
+    const unsigned char positionRead[]={0x8D,0x87,0x90,0,0,0};
+    const unsigned char stateRead[]={0x8B,0x99,0x98,0xFC,0xFF,0xFF};
+    if(!Bytes(0x746750,update,sizeof(update))||!Bytes(0x745580,skid,sizeof(skid))||
+       !Bytes(0x746986,positionRead,sizeof(positionRead))||!Bytes(0x7469FF,stateRead,sizeof(stateRead)))return false;
+    struct Hook {uintptr_t address;void* target;void** original;};
+    const Hook hooks[]={{0x746750,&UpdateTires,reinterpret_cast<void**>(&originalUpdateTires)},
+        {0x745580,&Skids,reinterpret_cast<void**>(&originalSkids)}};
+    size_t created=0;bool ok=true;
+    for(const auto& hook:hooks) {if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.target,hook.original)!=MH_OK){ok=false;break;}++created;}
+    if(ok)for(const auto& hook:hooks)if(MH_EnableHook(reinterpret_cast<void*>(hook.address))!=MH_OK){ok=false;break;}
+    if(!ok)for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}
+    return ok;
+}
 using RenderFn=bool(__thiscall*)(DWORD*,void*,const float*,const Matrix*,Matrix*,Matrix*,Matrix*,unsigned,int,int,float,int,int);
 RenderFn originalRender=nullptr;
 bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const Matrix* body,
     Matrix* tires,Matrix* brakes,Matrix* spinners,unsigned flags,int light,int reflection,float shadow,int tireLod,int carLod) {
     if(!Ready()||!car||!car[33]||!car[34]||!body||!position)
         return originalRender(car,view,position,body,tires,brakes,spinners,flags,light,reflection,shadow,tireLod,carLod);
-    Context context{};
-    context.car=car;
+    Context context=CarContext(car);
     DWORD* ride=reinterpret_cast<DWORD*>(car[33]);
-    context.name=GetCarTypeName(ride[0]);
-    context.body=PartHash(ride,23);
-    if(auto part=RideInfo_GetPart(ride,23))
-        context.kit=CarPart_GetAppliedAttributeIParam(part,bStringHash("KITNUMBER"),0);
-    context.frontWheel=PartHash(ride,66);
-    context.rearWheel=PartHash(ride,67);
-    if(!context.rearWheel) context.rearWheel=context.frontWheel;
     const bool frontend=*reinterpret_cast<int*>(0x925e90)==3;
     if(frontend&&!reflection&&view==reinterpret_cast<void*>(0x919650)) {
         setContext(context.name,context.body,context.frontWheel,context.rearWheel,1);
@@ -271,6 +327,8 @@ bool Install() {
             }
         }
     } else Log("Wheel capture disabled: another mod owns a submission call site.");
+    Log(InstallTireEffects()?"Race tire matrices, contact FX and proportional skid width hooks installed.":
+        "Race tire effects disabled: unknown layout or competing hooks.");
     Log("Stance bridge installed for PC 1.3, Unlimiter 3.3.1.1338.");return true;
 }
 } // namespace CustomizationBridge

@@ -37,3 +37,7 @@ target_link_libraries(customization_profile_host_tests PRIVATE minhook bcrypt)
 target_compile_definitions(customization_profile_host_tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_compile_options(customization_profile_host_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_profile_host COMMAND customization_profile_host_tests)
+
+add_executable(customization_race_math_tests tests/customization_race_math_tests.cpp)
+target_compile_options(customization_race_math_tests PRIVATE /W4 /utf-8 /EHsc)
+add_test(NAME customization_race_math COMMAND customization_race_math_tests)

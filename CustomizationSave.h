@@ -282,6 +282,39 @@ static void __fastcall Build(DWORD* stable,void*,uint32_t handle,int player,DWOR
         if(Rides.size()>512) Rides.clear();Rides[ride]={key,Fingerprint(ride)};return;
     }
 }
+// Racing creates a fresh RideInfo from the original frontend customization
+// record, bypassing BuildRideForPlayer. Bind only the local-player usage and
+// exact active-profile record address; matching equipment is never ownership.
+static bool BindRaceCustomization(DWORD* ride,const void* customization,int usage) {
+    if(!ride)return false;
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    Rides.erase(ride); // Reused allocations must not retain an old owner.
+    auto stable=Stable();
+    if(usage!=0||!stable||!customization)return false;
+    const uintptr_t first=reinterpret_cast<uintptr_t>(stable)+0xFA0;
+    const uintptr_t address=reinterpret_cast<uintptr_t>(customization);
+    if(address<first||address>=first+76*0x198||(address-first)%0x198)return false;
+    const unsigned index=unsigned((address-first)/0x198);
+    if(reinterpret_cast<const BYTE*>(customization)[0x194]!=index)return false;
+    Key owner{};bool found=false;
+    for(int i=0;i<200;++i) {
+        Key candidate;
+        if(ReadKey(stable+i*5,candidate)&&candidate.customization==index) {
+            if(found)return false; // A corrupt/ambiguous stable is not safe to inherit.
+            owner=candidate;found=true;
+        }
+    }
+    if(!found)return false;
+    if(Rides.size()>512)Rides.clear();
+    Rides[ride]={owner,Fingerprint(ride)};return true;
+}
+using RaceLoadFn=bool(__thiscall*)(DWORD*,unsigned,int,bool,const void*);
+static RaceLoadFn OriginalRaceLoad=nullptr;
+static bool __fastcall LoadRace(DWORD* connection,void*,unsigned world,int usage,bool commit,const void* customization) {
+    const bool result=OriginalRaceLoad(connection,world,usage,commit,customization);
+    if(result)BindRaceCustomization(reinterpret_cast<DWORD*>(connection[0x40/4]),customization,usage);
+    return result;
+}
 static DWORD* __fastcall NewCar(DWORD* stable,void*) {
     DWORD* record=OriginalNew(stable);
     if(record&&stable==Stable()) {
@@ -298,7 +331,8 @@ static bool Install() {
     struct Hook {uintptr_t address;void* replacement;void** original;std::vector<unsigned char> bytes;};
     std::vector<Hook> hooks={
         {0x5910E0,&Build,reinterpret_cast<void**>(&OriginalBuild),{0x8B,0x54,0x24,4,0x53,0x57}},
-        {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}}
+        {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}},
+        {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}}
     };
     for(const auto& hook:hooks) if(std::memcmp(reinterpret_cast<void*>(hook.address),hook.bytes.data(),hook.bytes.size())) {
         Log("Save extension disabled: unknown executable or competing hook.");return false;

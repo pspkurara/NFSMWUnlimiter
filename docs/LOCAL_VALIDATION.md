@@ -62,3 +62,31 @@ including fenderless cars, and race owned-car lineage. A standalone camera host
 and coordinated save-hook ownership remain necessary for independent camera
 distribution. Countdown/scripted-camera contexts remain unverified. The installed
 development snapshot must not be described as the completed requested product.
+
+## Follow-up: race stance and emergency editor safety
+
+The companion commit 789c4c3 disables the temporary editor hotkey by default,
+including older INIs without DebugEditorHotkey. An invalid context no longer
+opens a modal error popup while holding the mutex used by rendering. This
+companion-only hotfix was backed up and installed in the original game.
+
+The fork now binds racing RideInfo at VehicleRenderConn::Load, using local-player
+usage 0 and the exact customization-record address within the active profile.
+No equipment match or copied handle is used as ownership proof. Unknown copies,
+AI usage and ambiguous records remain native. Fixtures cover these exclusions.
+
+A guarded UpdateTires adapter changes temporary lateral positions and render
+radii before native wheel matrices/contact points/FX are generated. A scoped
+DoSkids adapter scales native skid width by the selected visual-width ratio;
+stock calibration remains unchanged when there is no override. Position/radius
+inputs are restored after the native update. This does not change handling or
+physics suspension. Native PC offsets were checked against disassembly. Math
+and lifecycle fixtures pass, but actual race rendering, skid/smoke alignment,
+freeroam and durable game save/reload require live validation. Do not call this
+race integration verified merely because the build passes.
+
+The planned body-shop submenu, native sliders, grouped purchase/discard and
+configurable price (default zero) are not implemented yet. The temporary editor
+is debug-only and disabled until deliberately opted in. Vehicle-heading camera
+basis is implemented with legacy-state migration; mirror auto-hide remains
+pending and its new checkbox is disabled rather than pretending it works.
