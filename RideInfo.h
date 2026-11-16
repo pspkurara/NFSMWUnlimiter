@@ -324,7 +324,9 @@ unsigned int __fastcall RideInfo_SetPart(DWORD* RideInfo, int EDX_Unused, int Ca
 	return PreviousPart;
 }
 
-void __fastcall RideInfo_SetRandomParts(DWORD* RideInfo, void* EDX_Unused)
+// Optional observer runs once after all branches of the existing adapter finish.
+static void(__cdecl* RideInfoRandomObserver)(DWORD*) = nullptr;
+void __fastcall RideInfo_SetRandomParts_Impl(DWORD* RideInfo, void* EDX_Unused)
 {
 	int CustomizationLevel;
 
@@ -512,4 +514,10 @@ void __fastcall RideInfo_SetRandomParts(DWORD* RideInfo, void* EDX_Unused)
 			break;
 		}
 	}
+}
+
+void __fastcall RideInfo_SetRandomParts(DWORD* ride, void* unused)
+{
+    RideInfo_SetRandomParts_Impl(ride, unused);
+    if (RideInfoRandomObserver) RideInfoRandomObserver(ride);
 }

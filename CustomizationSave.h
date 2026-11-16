@@ -64,6 +64,11 @@ static std::string Profile, SavingProfile;
 static bool HooksReady = false, SaveCaptured = false;
 static void(__cdecl* RegisterEditor)(int(__cdecl*)(uint64_t,const Values*,int)) = nullptr;
 static void(__cdecl* SetOwnedContext)(uint64_t,const Values*) = nullptr;
+// Optional transient adapters share observed native copies, never owned data.
+// Callbacks must not call back into this namespace or acquire its Mutex.
+static void(*TransientReset)() = nullptr;
+static void(*TransientRideCopy)(const DWORD*,DWORD*) = nullptr;
+static void(*TransientRecordCopy)(const void*,void*) = nullptr;
 
 static bool ValidValues(const Values& value) {
     if(value.size!=sizeof(Values) || (value.mask&~0xFFFu)) return false;
@@ -96,6 +101,7 @@ static bool CurrentKey(const Key& key) {
     return false;
 }
 static void LoadLocked(const std::string& name) {
+    if(TransientReset)TransientReset();
     Profile=name; Pending.clear();Preview.clear();Rides.clear();CustomizationCopies.clear();Tokens.clear();ActiveEditorToken=0;
     Saving.clear();SaveCaptured=false;SavingProfile.clear();
     try {
@@ -131,6 +137,9 @@ static void EnsureProfileLocked() {
     }
     std::string name=Name(reinterpret_cast<const char*>(native));
     if(ValidName(name)&&name!=Profile) LoadLocked(name);
+}
+static void SynchronizeProfile() {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
 }
 static uint64_t Fingerprint(const DWORD* ride) {
     uint64_t hash=14695981039346656037ull;
@@ -282,6 +291,7 @@ static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t
     const std::string name=Name(profile);
     auto backup=Backups.find(buffer);
     if(!native&&backup!=Backups.end()&&backup->second.profile==name) {
+        if(TransientReset)TransientReset();
         Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();CustomizationCopies.clear();
     } else {LoadLocked(name);Backups.clear();}
 }
@@ -302,6 +312,7 @@ static void __fastcall Build(DWORD* stable,void*,uint32_t handle,int player,DWOR
 static bool TrackRideCopy(DWORD* source,DWORD* destination) {
     if(!destination)return false;
     std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    if(TransientRideCopy)TransientRideCopy(source,destination);
     Binding binding{};bool known=false;
     auto found=Rides.find(source);
     if(source&&found!=Rides.end()&&CurrentKey(found->second.key)&&found->second.fingerprint==Fingerprint(source)) {
@@ -350,9 +361,14 @@ static bool CustomizationOwnerLocked(const void* customization,Key& owner) {
        copy->second.fingerprint!=CustomizationFingerprint(customization))return false;
     owner=copy->second.key;return true;
 }
+static bool IsOwnedCustomization(const void* record) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    Key owner{};return CustomizationOwnerLocked(record,owner);
+}
 static void __cdecl TrackCustomizationCopy(const void* source,void* destination) noexcept {
     try {
         std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+        if(TransientRecordCopy)TransientRecordCopy(source,destination);
         CustomizationCopies.erase(destination);
         Key key;
         if(destination&&CustomizationOwnerLocked(source,key)) {

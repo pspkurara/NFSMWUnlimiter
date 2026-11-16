@@ -70,7 +70,11 @@ unsigned PartHash(DWORD* ride,int slot) {
 }
 float Value(const Context& c,int axle,int channel,float original) {
     float value=resolve(c.name,c.body,axle?c.rearWheel:c.frontWheel,axle,channel,original);
-    if(enabled&&enabled()) value=CustomizationSave::Resolve(reinterpret_cast<DWORD*>(c.car[33]),axle,channel,value);
+    if(enabled&&enabled()) {
+        auto ride=reinterpret_cast<DWORD*>(c.car[33]);
+        value=CustomizationRandom::Resolve(ride,axle,channel,value);
+        value=CustomizationSave::Resolve(ride,axle,channel,value);
+    }
     // Defense at the process boundary even when another companion implements the ABI.
     return std::isfinite(value)?value:original;
 }

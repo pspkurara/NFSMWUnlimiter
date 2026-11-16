@@ -34,6 +34,7 @@ bool ManuHook, ExtraCustomization, DisappearingWheelsFix, SecondaryLogoFix, Expa
 #include "Helpers.h"
 #include "CodeCaves.h"
 #include "CustomizationSave.h"
+#include "CustomizationRandom.h"
 #include "CustomizationControls.h"
 #include "CustomizationBridge.h"
 #include "CustomizationCamera.h"
@@ -369,6 +370,7 @@ int Init()
 
 	const bool lifecycleReady=CustomizationProfileHost::Install();
 	CustomizationSave::Install();
+	CustomizationRandom::Install(RandomHook);
 	CustomizationControls::Install(lifecycleReady);
 	CustomizationCamera::Install();
     CustomizationStanceMenu::Install();
