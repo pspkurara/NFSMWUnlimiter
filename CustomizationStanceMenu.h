@@ -144,7 +144,13 @@ static void Heading(const char* error=nullptr) {
         "STANCE: FRONT | RB FINE | LB FAST | Y COPY","STANCE: REAR | RB FINE | LB FAST | Y COPY"};
     // These objects belong to our independent package clone. The race tuning
     // package and its labels remain untouched and every edit is restored on exit.
-    Text(0x42ADB44C,error?error:modes[EditSession.axle]); // HEADERTEXT
+    // HEADERTEXT itself is a group in the stock PC asset. Update both actual
+    // strings, including the drop shadow, rather than rejecting the group as text.
+    Text(bStringHash("HEADER_TEXT_MAIN"),error?error:modes[EditSession.axle]);
+    Text(bStringHash("HEADER_TEXT_SHADOW"),error?error:modes[EditSession.axle]);
+    // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
+    // now copies a channel, so its visible Y prompt must describe that action.
+    Text(0x2FBBF8E8,"Copy");Text(0x55FA05C3,"Copy");
     Text(0x05CDDED4,"LT/RT: axle   X: inherit   Shift: fine   Ctrl: fast");
 }
 static void __fastcall Draw(DWORD* slider,void*) {
