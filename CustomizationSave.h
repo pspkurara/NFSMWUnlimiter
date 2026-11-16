@@ -175,6 +175,19 @@ static int __cdecl Edit(uint64_t token,const Values* values,int action) {
     }
     return 1;
 }
+static bool NativeMenuOwner(uint64_t& token,Values& values) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    if(!HooksReady||!ActiveEditorToken)return false;
+    for(const auto& entry:Tokens)if(entry.second==ActiveEditorToken&&CurrentKey(entry.first)) {
+        token=entry.second;values=Values{};
+        auto found=Pending.find(entry.first);if(found!=Pending.end())values=found->second;
+        return true;
+    }
+    return false;
+}
+static bool NativeMenuOwnerCurrent(uint64_t token) {
+    uint64_t current=0;Values ignored;return NativeMenuOwner(current,ignored)&&current==token;
+}
 static void EditorContext(DWORD* ride) {
     if(!HooksReady) return;
     if(!SetOwnedContext) {

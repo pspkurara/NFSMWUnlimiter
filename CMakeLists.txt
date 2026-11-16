@@ -41,3 +41,11 @@ add_test(NAME customization_profile_host COMMAND customization_profile_host_test
 add_executable(customization_race_math_tests tests/customization_race_math_tests.cpp)
 target_compile_options(customization_race_math_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_race_math COMMAND customization_race_math_tests)
+
+add_executable(customization_stance_session_tests tests/customization_stance_session_tests.cpp)
+target_compile_options(customization_stance_session_tests PRIVATE /W4 /utf-8 /EHsc)
+add_test(NAME customization_stance_session COMMAND customization_stance_session_tests)
+
+add_executable(customization_stance_assets_tests tests/customization_stance_assets_tests.cpp)
+target_compile_options(customization_stance_assets_tests PRIVATE /W4 /utf-8 /EHsc)
+add_test(NAME customization_stance_assets COMMAND customization_stance_assets_tests)

@@ -9,6 +9,7 @@ char RimBrandID[15];
 char RimBrandString[64];
 char RimBrandIcon[64];
 void* _CustomizeCategoryScreen;
+namespace CustomizationStanceMenu {void AddPartsOption(DWORD* screen);}
 
 int __fastcall CustomizeSub_SetupParts(DWORD* _CustomizeSub, void* EDX_Unused)
 {
@@ -171,6 +172,7 @@ int __fastcall CustomizeSub_SetupParts(DWORD* _CustomizeSub, void* EDX_Unused)
             bStringHash("CO_CUSTOM_HUD"),
             0x307);
     }
+    CustomizationStanceMenu::AddPartsOption(_CustomizeCategoryScreen);
     InitialPosition = _CustomizeCategoryScreen[85] & 0xFFFF00FF;
     if (*((BYTE*)_CustomizeCategoryScreen + 0x129))
     {

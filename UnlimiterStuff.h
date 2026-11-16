@@ -37,6 +37,7 @@ bool ManuHook, ExtraCustomization, DisappearingWheelsFix, SecondaryLogoFix, Expa
 #include "CustomizationControls.h"
 #include "CustomizationBridge.h"
 #include "CustomizationCamera.h"
+#include "CustomizationStanceMenu.h"
 
 int Init()
 {
@@ -370,5 +371,6 @@ int Init()
 	CustomizationSave::Install();
 	CustomizationControls::Install(lifecycleReady);
 	CustomizationCamera::Install();
+    CustomizationStanceMenu::Install();
 	return 0;
 }

@@ -32,6 +32,7 @@ namespace CustomizationCamera
     };
 
     static Options Config;
+    static void(__cdecl* GarageUpdateObserver)()=nullptr;
     static DWORD* PartsScreen = nullptr;
     static bool DriverPreviewActive = false;
     static bool GarageControlled = false;
@@ -201,6 +202,7 @@ namespace CustomizationCamera
 
     static void __fastcall GarageJoyEvents(DWORD* garage, void*)
     {
+        if(GarageUpdateObserver)GarageUpdateObserver();
         DriverPreviewActive = Config.driverPreview && PartsScreen && garage[0x88 / 4] == 0x308;
         float x = 0, y = 0;
         bool reset = false;

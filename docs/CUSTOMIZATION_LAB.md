@@ -26,12 +26,14 @@ This branch is unfinished; building it does not establish game compatibility.
   view, including deferred-queue tagging and D3D state restoration. It does not
   discover fenders. No unmeasured real-car plane is enabled by default.
 
-Install the companion ASI and its INI alongside this fork to use the stance
-editor. F6 opens the separate editor while a compatible frontend car is active;
-F5 reloads its writable user INI. The enable checkbox is off initially. The
-linked-axles checkbox edits both axle fields to the same absolute value.
-Owned-car edits use **Stage for game save**, then the normal game save operation.
-An unowned car explicitly uses car-type INI presets instead.
+Install the companion ASI and its INI alongside this fork. The native body-shop
+adapter adds an owned-car stance entry using the game's installed slider assets;
+see [native menu details and validation status](STANCE_NATIVE_MENU.md).
+The separate Windows editor is debug-only and disabled by default. Opt in with
+`[General] DebugEditorHotkey=1` to use `EditorKey` (default F6); F5 reloads the
+user INI. Existing installations may assign different keys. The feature itself
+ships disabled and can be enabled from the stance UI. Owned-car values are
+staged for the next native save; unowned car-type presets remain in the INI.
 
 Ranges and steps live in the companion INI. Width and radius are positive
 dimensions; their +/- controls change those dimensions in both directions.
