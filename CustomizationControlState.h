@@ -18,6 +18,21 @@ struct State {
 };
 static_assert(sizeof(State)==96,"Controls sidecar state version 4");
 constexpr uint32_t LegacyStateBytes=72,Version2StateBytes=76,Version3StateBytes=88;
+// Runtime-only evidence from a successfully composed main-view camera pose.
+// Expiration releases the mirror if the mover disappears or stops updating.
+struct MirrorPose {
+    uint64_t sampledAt=0;bool rotated=false;
+    void Clear() {sampledAt=0;rotated=false;}
+    void Observe(uint64_t now,float yaw,float pitch) {
+        sampledAt=now;
+        rotated=std::isfinite(yaw)&&std::isfinite(pitch)&&
+            (std::fabs(std::remainder(yaw,360.f))>.001f||std::fabs(pitch)>.001f);
+    }
+    bool Hide(const State& state,int viewId,bool racing,bool foreground,uint64_t now) const {
+        return state.enabled&&state.hideMirror&&viewId==1&&racing&&foreground&&rotated&&
+            sampledAt&&now>=sampledAt&&now-sampledAt<=250;
+    }
+};
 // Garage axes have their own stick choice, but can share the active profile's
 // orientation/threshold without depending on the driving feature being enabled.
 struct AxisTuning {float deadzone;bool invertX,invertY;};

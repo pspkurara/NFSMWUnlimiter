@@ -262,6 +262,13 @@ namespace CustomizationCamera
     struct ViewStamp { uintptr_t anchor=0; int desired=0,current=0; BYTE lag=0; };
     static ViewStamp LastView;
     static CustomizationControls::MouseOrbit Mouse;
+    static CustomizationControls::MirrorPose Mirror;
+    static bool __cdecl MirrorVisible(int viewId) {
+        const auto controls=CustomizationControls::Runtime();
+        if(Mirror.Hide(controls,viewId,*reinterpret_cast<const int*>(0x925E90)==6,
+            CustomizationControls::Foreground(),GetTickCount64()))return false;
+        return reinterpret_cast<bool(__cdecl*)(int)>(0x595D40)(viewId);
+    }
     static CustomizationControls::MouseSample MouseInput() {
         CustomizationControls::MouseSample sample;
         if(NativeMouseVerified) {
@@ -288,6 +295,7 @@ namespace CustomizationCamera
         ULONGLONG now = GetTickCount64();
         // Main player view only; mirror, split screen and other movers retain stock behavior.
         bool mainView = *reinterpret_cast<int*>(static_cast<BYTE*>(mover) + 0x10) == 1;
+        if(mainView)Mirror.Clear();
         float x = 0, y = 0;
         bool reset = false;
         const auto controls = CustomizationControls::Runtime();
@@ -380,6 +388,7 @@ namespace CustomizationCamera
         if(!CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated,Mouse.zoom)) {
             original(matrix,eye,look,up);return;
         }
+        Mirror.Observe(now,Yaw,Pitch);
         const Vec orbitEye={rotated.eye.x,rotated.eye.y,rotated.eye.z,0};
         const Vec orbitLook={rotated.look.x,rotated.look.y,rotated.look.z,0};
         original(matrix,&orbitEye,&orbitLook,up);
@@ -492,7 +501,19 @@ namespace CustomizationCamera
         const unsigned char orbitCall[] = {0xE8, 0xDF, 0x13, 0x25, 0};
         const unsigned char moverView[] = {0x8B, 0x4E, 0x10};
         if (Matches(0x47DCBC, orbitCall) && Matches(0x47DCC1, moverView))
+        {
             injector::MakeCALL(0x47DCBC, OrbitLookAtCave, true);
+            // Both native decisions feed one view-mode path: it switches off the
+            // mirror scene and its mask together, without changing saved options.
+            const unsigned char mirrorEntry[]={0xA1,0x84,0xD8,0x92,0,0x53,0x8B,0x5C,0x24,0x08};
+            const unsigned char mirrorEnter[]={0xE8,0xC6,0x61,0xEC,0xFF};
+            const unsigned char mirrorLeave[]={0xE8,0x73,0x61,0xEC,0xFF};
+            if(Matches(0x595D40,mirrorEntry)&&Matches(0x6CFB75,mirrorEnter)&&Matches(0x6CFBC8,mirrorLeave)) {
+                injector::MakeCALL(0x6CFB75,MirrorVisible,true);
+                injector::MakeCALL(0x6CFBC8,MirrorVisible,true);
+                CustomizationControls::MirrorAvailable=true;
+            } else Report("Native mirror visibility layout differs; orbit auto-hide disabled.");
+        }
         else Report("Race orbit signature mismatch; orbit hook not installed.");
     }
 }

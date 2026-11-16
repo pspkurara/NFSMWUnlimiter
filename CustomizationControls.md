@@ -128,3 +128,16 @@ The radial live range is rescaled after the deadzone. Rate mode with return dela
 Native PC look-back uses the current POV's camera parameters, not a verified
 shared rear-only camera preset. A universal rear-view position/height/distance
 option is therefore not supplied.
+
+`Hide mirror while camera is rotated` suppresses the main-player mirror while a
+successfully composed orbit has nonzero yaw or pitch. Neutral Direction input,
+reset and completed recentering release it; zoom or vehicle-heading alignment
+alone do not hide it. Focus/flow loss and a 250 ms stale camera sample release
+the override. The game still decides visibility using HUD, camera, pause and the
+saved Rearview setting; this feature never forces a normally hidden mirror on.
+
+Both verified PC calls to the native mirror predicate (0x6CFB75/0x6CFBC8,
+callee 0x595D40) use the same native view-mode path for scene and mask. Unknown
+code ownership leaves the feature disabled in the editor. The saved version-4
+flag and controls transaction are unchanged. Native visual validation remains
+required, including a mirror-capable POV and transitions to/from pause.

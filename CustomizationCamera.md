@@ -105,6 +105,7 @@ The local disassembly confirms:
 | `0x476E70`, `0x476F30` | existing vertical/horizontal rotation setters |
 | `0x74EC4F` | driver rendering branch that hides the driver when game flow is 3 |
 | `0x47DCBC` | Cubic Update calls eCreateLookAtMatrix at `0x6CF0A0` |
+| `0x6CFB75`, `0x6CFBC8` / `0x595D40` | native mirror visibility calls and predicate; scene/mask share view-mode control |
 
 The PC mover view ID at `+0x10` is read at `0x47DCC1`; main player ID 1 is also
 named by the decompilation's `EVIEW_PLAYER1`. The live PC rotation setters and

@@ -10,6 +10,16 @@ int main(){try{
     Session session;
     require(Valid(session.active),"valid defaults");
     require(session.active.resetButtons==0,"defaults must not shadow native R3 camera-view action");
+    State mirrorSettings;mirrorSettings.enabled=mirrorSettings.hideMirror=1;
+    MirrorPose mirror;mirror.Observe(1000,180,0);
+    require(mirror.Hide(mirrorSettings,1,true,true,1001),"rotated main view hides mirror");
+    require(!mirror.Hide(mirrorSettings,3,true,true,1001),"mirror and other views retain native policy");
+    require(!mirror.Hide(mirrorSettings,1,false,true,1001)&&!mirror.Hide(mirrorSettings,1,true,false,1001),"flow/focus changes release mirror policy");
+    require(!mirror.Hide(mirrorSettings,1,true,true,1251),"stale mover cannot retain hidden mirror");
+    mirror.Observe(1300,360,0);require(!mirror.Hide(mirrorSettings,1,true,true,1300),"full-circle neutral restores native policy");
+    mirror.Observe(1400,0,5);require(mirror.Hide(mirrorSettings,1,true,true,1400),"vertical orbit hides mirror");
+    mirrorSettings.hideMirror=0;require(!mirror.Hide(mirrorSettings,1,true,true,1400),"mirror option is independent");
+    mirrorSettings.hideMirror=1;mirror.Clear();require(!mirror.Hide(mirrorSettings,1,true,true,1400),"reset releases mirror immediately");
     State shared;shared.enabled=0;shared.invertX=1;shared.deadzone=.4f;
     const AxisTuning local{.1f,false,true};
     auto garage=GarageTuning(shared,true,true,local);

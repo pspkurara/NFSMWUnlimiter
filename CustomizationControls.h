@@ -33,6 +33,7 @@ static std::string SavingProfile;
 struct Backup {std::string profile;State state;uint32_t inputCrc;};
 static std::map<void*,Backup> Backups;
 static std::atomic<HWND> Dialog{nullptr};
+static std::atomic<bool> MirrorAvailable{false};
 static HWND Message=nullptr;
 static HWND EnabledBox=nullptr,InvertXBox=nullptr,InvertYBox=nullptr,YawBox=nullptr,PitchBox=nullptr;
 static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=nullptr,MouseSpeedBox=nullptr,MouseZoomBox=nullptr,HeadingBox=nullptr,MirrorBox=nullptr;
@@ -261,8 +262,8 @@ static void OpenDialog(){
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Rate orbit (UG2 style)"));
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Direction: release to center"));
     HeadingBox=Child(L"BUTTON",L"Keep orbit relative to vehicle heading",BS_AUTOCHECKBOX,16,458,375,25);
-    MirrorBox=Child(L"BUTTON",L"Mirror auto-hide (integration pending)",BS_AUTOCHECKBOX,420,458,375,25);
-    EnableWindow(MirrorBox,FALSE);
+    MirrorBox=Child(L"BUTTON",L"Hide mirror while camera is rotated",BS_AUTOCHECKBOX,420,458,375,25);
+    EnableWindow(MirrorBox,MirrorAvailable.load());
     Message=Child(L"STATIC",L"Direction mode uses both axes for horizontal direction; native look-back can run alongside it.",0,16,500,770,40);
     if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,595,230,30,4);
     Child(L"BUTTON",L"Apply",WS_TABSTOP,330,595,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,595,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,595,120,30,3);
