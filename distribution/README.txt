@@ -17,8 +17,12 @@ For a later test installation:
 3. Keep stance, race orbit and clipping disabled until the relevant checks
    in the documentation are completed. Garage camera/driver code is enabled
    in its supplied INI and remains experimentally unverified.
-4. F6 opens the stance editor. Owned cars stage changes for the next normal
-   game save; unowned cars explicitly use car-type INI presets.
+4. The Parts/body shop contains an owned-car Stance adjustment entry. Its
+   sliders use a private in-memory copy of the installed stock game template.
+   No Binary edit or copied game asset is required. Native UI verification is
+   still pending. Accept stages a free grouped adjustment for the next normal
+   save; Back discards it. The separate debug editor hotkey is off by default.
+   Set DebugEditorHotkey=1 deliberately to use EditorKey (default F6).
 5. F7 from the native PC Controls screen opens driving-camera bindings.
    Apply returns changes to the native controls confirmation transaction.
    Preserve NFSMWCustomizationControls.bin alongside its matching profile.
