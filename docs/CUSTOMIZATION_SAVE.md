@@ -25,6 +25,9 @@ handle and career handle. Profile changes clear session tokens, pending state,
 previews and render bindings. New native car records invalidate reused handles.
 BuildRideForPlayer establishes known owned RideInfo bindings. Unknown pointers
 are not matched merely by equipment: an AI car can have identical parts.
+CarViewer::SetRideInfo carries the exact observed binding into its static PC
+RideInfo before constructing the frontend car; frontend refresh and loaded-car
+copies then carry that binding onward. A new unknown source clears the destination.
 Copied RideInfo lineage and all game save/load flows still require real-game
 verification. The extension is not claimed to work for every vehicle path.
 

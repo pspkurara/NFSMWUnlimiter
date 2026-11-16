@@ -16,6 +16,11 @@ static int __cdecl Sampler(const char*,uint32_t,uint32_t,CustomizationSave::Valu
 }
 static void __fastcall NativeWrite(void* record,void*,DWORD* ride) {std::memcpy(record,ride,sizeof(DWORD));}
 static void __fastcall NativeRead(void* record,void*,DWORD* ride) {std::memcpy(ride,record,sizeof(DWORD));}
+static int viewerReason=-1,viewerWhich=-1;
+static void __cdecl NativeSetViewerRide(DWORD* ride,int reason,int whichCar) {
+    viewerReason=reason;viewerWhich=whichCar;
+    std::memcpy(reinterpret_cast<void*>(FixtureAddress(0x9BA088)),ride,0x310);
+}
 static void __declspec(naked) NativeCtor() {__asm {mov eax,ecx} __asm {ret}}
 static void __declspec(naked) NativeCopy() {
     __asm {mov ecx,0x66} __asm {mov edi,eax} __asm {rep movsd} __asm {ret}
@@ -36,12 +41,19 @@ int main() {
     R::Randomized(source.data());
     Check(samples==1&&R::Resolve(source.data(),0,0,0)==-.01f,"One sample at random-parts completion");
     Check(R::Resolve(identical.data(),0,0,0)==0,"Identical equipment never creates lineage");
-    // The real shared copy observer runs before native memcpy.
-    CustomizationSave::TrackRideCopy(source.data(),viewer.data());
-    std::memcpy(viewer.data(),source.data(),source.size()*4);
+    // Quick Race has an extra static CarViewer copy before frontend construction.
+    CustomizationSave::OriginalSetViewerRide=&NativeSetViewerRide;
+    CustomizationSave::SetViewerRide(source.data(),1,0);
+    auto viewerStatic=reinterpret_cast<DWORD*>(FixtureAddress(0x9BA088));
+    Check(viewerReason==1&&viewerWhich==0&&R::Resolve(viewerStatic,0,0,0)==-.01f,
+        "CarViewer static copy preserves the selected generation and native arguments");
+    // The following frontend instance copy runs before its native memcpy.
+    CustomizationSave::TrackRideCopy(viewerStatic,viewer.data());
+    std::memcpy(viewer.data(),viewerStatic,source.size()*4);
     Check(R::Resolve(viewer.data(),1,0,0)==-.01f&&samples==1,"Frontend copy preserves selection without reroll");
     std::array<BYTE,0x198> record{},copy{};
-    R::WriteRecord(record.data(),nullptr,viewer.data());
+    // Accept uses CarViewer's static RideInfo, rather than its render instance.
+    R::WriteRecord(record.data(),nullptr,viewerStatic);
     CustomizationSave::OriginalCustomizationCopy=reinterpret_cast<void*>(&NativeCopy);
     auto from=record.data();auto to=copy.data();
     __asm {

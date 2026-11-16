@@ -25,7 +25,8 @@ record. Therefore a map attached only to the temporary RideInfo is insufficient.
 The verified PC transitions are:
 
 1. Random parts complete: generate one transient selection for that ride generation.
-2. RideInfo/loaded/frontend copies: carry the selection with the exact source copy.
+2. CarViewer::SetRideInfo (7A9DB0) copies to static RideInfo 9BA088 before frontend
+   construction. Carry that exact source copy, then the loaded/frontend copies.
 3. FECustomizationRecord::WriteRideIntoRecord (56F2F0): carry it into that record.
 4. Native customization deep copy (689361): carry it into the race copy.
 5. WriteRecordIntoRide (56F2B0) and race render-connection load: bind the selection

@@ -322,6 +322,14 @@ static bool TrackRideCopy(DWORD* source,DWORD* destination) {
     if(known) {if(Rides.size()>512)Rides.clear();Rides[destination]=binding;}
     return known;
 }
+using SetViewerRideFn=void(__cdecl*)(DWORD*,int,int);
+static SetViewerRideFn OriginalSetViewerRide=nullptr;
+static void __cdecl SetViewerRide(DWORD* ride,int reason,int whichCar) {
+    // PC CarViewer first copies 0x310 bytes into its static RideInfo, then
+    // constructs/refreshes the displayed car from that copy (not from ride).
+    TrackRideCopy(ride,reinterpret_cast<DWORD*>(GlobalAddress(0x9BA088)));
+    OriginalSetViewerRide(ride,reason,whichCar);
+}
 using ReInitFn=void(__thiscall*)(DWORD*,DWORD*);
 using LoadedRideFn=DWORD*(__thiscall*)(DWORD*,DWORD*,int,int,int);
 static ReInitFn OriginalReInit=nullptr;
@@ -429,6 +437,7 @@ static bool Install() {
         {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}},
         {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}},
         {0x689361,&CustomizationCopyCave,&OriginalCustomizationCopy,{0xB9,0x66,0,0,0,0x8B,0xF8,0xF3,0xA5}},
+        {0x7A9DB0,&SetViewerRide,reinterpret_cast<void**>(&OriginalSetViewerRide),{0x8B,0x0D,0xDC,0xCA,0x91,0}},
         {0x7609B0,&ReInit,reinterpret_cast<void**>(&OriginalReInit),{0x64,0xA1,0,0,0,0}},
         {0x752D20,&LoadedRide,reinterpret_cast<void**>(&OriginalLoadedRide),{0x8B,0x44,0x24,0x0C,0x53,0x55}}
     };

@@ -163,5 +163,7 @@ limiter switch. Saved absolute values retain their existing validation bounds.
 The user identified Claude as the source of concurrent original-game launches.
 Do not repeatedly close its game to make room for our tests. Keep the latest
 stance build in the private copy until coordinated runtime QA can proceed.
-Automatic stance selection is a separate pending feature; its native random-part
-and copy lifecycle is documented in STANCE_RANDOMIZATION.md.
+Automatic stance selection is now implemented with separate bounded ranges and
+grouped presets; its native random-part and copy lifecycle is documented in
+STANCE_RANDOMIZATION.md. Fixture coverage includes the extra static CarViewer
+copy used between Quick Race reroll and accept. Live runtime QA remains pending.
