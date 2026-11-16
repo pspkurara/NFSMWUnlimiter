@@ -1,6 +1,7 @@
 #pragma once
 #include "CustomizationControlState.h"
 #include "CustomizationProfileStorage.h"
+#include "CustomizationProfileHost.h"
 #include <MinHook.h>
 #include <mutex>
 #include <map>
@@ -156,6 +157,15 @@ static void OnEndLoad(const char* profile,void* buffer,bool native,bool,bool,int
     if(Screen)ControlSession.Begin();
     if(!backupFound)Backups.clear();
 }
+
+static const CustomizationProfileHost::Observer ControlsObserver={sizeof(CustomizationProfileHost::Observer),1,0x4354524C,nullptr,
+    [](void*,void* buffer,uint32_t native){OnBeginSave(buffer,native!=0);},
+    [](void*,void* buffer,uint32_t native){OnEndSave(buffer,native!=0);},
+    [](void*,const char* name){OnSaveDone(name);},
+    [](void*){OnBeginLoad();},
+    [](void*,const char* name,void* buffer,uint32_t native,uint32_t success,uint32_t commit,int32_t player){
+        OnEndLoad(name,buffer,native!=0,success!=0,commit!=0,player);
+    }};
 
 static std::wstring Text(HWND h){std::wstring s(GetWindowTextLengthW(h)+1,L'\0');GetWindowTextW(h,s.data(),int(s.size()));s.resize(wcslen(s.c_str()));return s;}
 static std::wstring Number(float n){wchar_t b[48];swprintf_s(b,L"%.6g",n);return b;}
@@ -332,8 +342,10 @@ static bool Install(bool nativeLifecycleReady){
         if(ok){
             HMODULE xinput=LoadLibraryExW(L"xinput1_4.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);if(!xinput)xinput=LoadLibraryExW(L"xinput9_1_0.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
             if(xinput)PadState=reinterpret_cast<decltype(PadState)>(GetProcAddress(xinput,"XInputGetState"));
-            Installed=true;if(auto thread=CreateThread(nullptr,0,RunUI,nullptr,0,nullptr))CloseHandle(thread);
-            CustomizationProfileStorage::Log("Native controls lifecycle extension installed. F7 opens orbit bindings from PC Controls.");return true;
+            if(CustomizationProfileHost::Register(ControlsObserver)) {
+                Installed=true;if(auto thread=CreateThread(nullptr,0,RunUI,nullptr,0,nullptr))CloseHandle(thread);
+                CustomizationProfileStorage::Log("Native controls lifecycle extension registered with profile host.");return true;
+            }
         }
     }
     for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].at));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].at));}return false;

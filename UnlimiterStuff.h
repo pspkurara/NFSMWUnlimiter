@@ -366,15 +366,9 @@ int Init()
 		//injector::MakeCALL(0x4FCF5B, FlushFromSkinCompositeCache, true);
 	}
 
-	const bool lifecycleReady=CustomizationSave::Install();
-	if(CustomizationControls::Install(lifecycleReady)) {
-		// The host owns native save transactions; controls own only their extension state.
-		CustomizationSave::ControlsBeginSave=&CustomizationControls::OnBeginSave;
-		CustomizationSave::ControlsEndSave=&CustomizationControls::OnEndSave;
-		CustomizationSave::ControlsDone=&CustomizationControls::OnSaveDone;
-		CustomizationSave::ControlsBeginLoad=&CustomizationControls::OnBeginLoad;
-		CustomizationSave::ControlsEndLoad=&CustomizationControls::OnEndLoad;
-	}
+	const bool lifecycleReady=CustomizationProfileHost::Install();
+	CustomizationSave::Install();
+	CustomizationControls::Install(lifecycleReady);
 	CustomizationCamera::Install();
 	return 0;
 }

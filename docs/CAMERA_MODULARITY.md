@@ -34,13 +34,19 @@ camera and customization products coexist: use one versioned registration path,
 validate the owner, and fail safely on unknown competing patches. Do not install
 two independent unconditional patches over the same native entry point.
 
-The controls header now builds without `CustomizationSave`: it receives native
-lifecycle readiness from its host and exposes the five transaction callbacks.
-The sidecar integration fixture includes controls directly without the owned-car
-adapter. The fork currently wires those callbacks to its save hooks and still
-builds driving orbit into the fork. A standalone native host and coordinated
-hook ownership still need implementation and solo/combined runtime verification
-before calling the camera an independent installed product.
+The controls header builds without `CustomizationSave`. Both controls and owned-car
+persistence subscribe separately to `CustomizationProfileHost.h`, a bounded,
+versioned C ABI. The first ready module owns the three native profile transactions;
+later known modules reuse it. Begin/end callbacks use the same listener snapshot,
+run outside the registry lock, and retain the native reader's temporary-load
+semantics. Installation rolls back only its own hooks on failure. Callback modules
+are pinned for the process lifetime; dynamic unloading is unsupported.
+
+The fork still builds driving orbit into its own binary. A standalone camera ASI
+and coordinated driving/input ownership still need implementation and solo/combined
+runtime verification before calling it an independent installed product. Registry
+validation and actual native-wrapper transaction ordering have automated fixtures;
+cross-DLL load order has not yet been tested in-game.
 
 ## Camera contexts
 

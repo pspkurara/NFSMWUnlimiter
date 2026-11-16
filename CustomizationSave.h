@@ -3,6 +3,7 @@
 #include <bcrypt.h>
 #include <MinHook.h>
 #include "CustomizationProfileStorage.h"
+#include "CustomizationProfileHost.h"
 #include <array>
 #include <vector>
 #include <map>
@@ -242,62 +243,36 @@ static void Commit(const std::string& name) {
     } catch(...) {Log("Sidecar commit failed; native save untouched.");}
 }
 
-using SaveFn=void(__thiscall*)(DWORD*,void*,int);
-// Independent extensions observe the same native transaction without sharing state locks.
-static void (*ControlsBeginSave)(void*,bool)=nullptr;
-static void (*ControlsEndSave)(void*,bool)=nullptr;
-static void (*ControlsDone)(const char*)=nullptr;
-static void (*ControlsBeginLoad)()=nullptr;
-static void (*ControlsEndLoad)(const char*,void*,bool,bool,bool,int)=nullptr;
-using DoneFn=void(__thiscall*)(DWORD*,const char*);
-using LoadFn=bool(__thiscall*)(DWORD*,void*,int,bool,int);
 using BuildFn=void(__thiscall*)(DWORD*,uint32_t,int,DWORD*);
 using NewFn=DWORD*(__thiscall*)(DWORD*);
-static SaveFn OriginalSave=nullptr;static DoneFn OriginalDone=nullptr;
-static LoadFn OriginalLoad=nullptr;static BuildFn OriginalBuild=nullptr;static NewFn OriginalNew=nullptr;
+static BuildFn OriginalBuild=nullptr;static NewFn OriginalNew=nullptr;
 struct Backup {std::string profile;State pending;};
 static std::map<void*,Backup> Backups;
-static void* NativeSaveBuffer() {
-    auto memoryCard=*reinterpret_cast<DWORD**>(GlobalAddress(0x91CB20));
-    return memoryCard?reinterpret_cast<void*>(memoryCard[0x44/4]):nullptr;
-}
-static void __fastcall Save(DWORD* profile,void*,void* buffer,int size) {
-    const bool active=profile==CurrentProfile();
-    const bool native=buffer==NativeSaveBuffer();
-    if(active&&ControlsBeginSave) ControlsBeginSave(buffer,native);
-    OriginalSave(profile,buffer,size);
-    if(active&&ControlsEndSave) ControlsEndSave(buffer,native);
-    if(profile!=CurrentProfile()) return;
+static thread_local DWORD* SaveSource=nullptr;
+static void __cdecl BeginOwnedSave(void*,void* buffer,uint32_t native) {
+    SaveSource=CurrentProfile();
     std::lock_guard<std::mutex> lock(Mutex);
-    EnsureProfileLocked();
-    if(buffer==NativeSaveBuffer()) {Saving=Pending;SavingProfile=Profile;SaveCaptured=true;Log("Native disk-save snapshot captured.");}
-    else {if(Backups.size()>8) Backups.clear();Backups[buffer]={Profile,Pending};}
+    if(native)SaveCaptured=false;else Backups.erase(buffer);
 }
-static void __fastcall Done(DWORD* callback,void*,const char* profile) {
-    std::string name=CompletedProfileName(profile);
-    Log(name.empty()?"Native SaveDone filename could not be identified.":"Native SaveDone received a profile filename.");
-    OriginalDone(callback,profile);
-    if(ValidName(name)) Commit(name);
-    if(ValidName(name)&&ControlsDone) ControlsDone(name.c_str());
+static void __cdecl EndOwnedSave(void*,void* buffer,uint32_t native) {
+    if(!SaveSource||SaveSource!=CurrentProfile())return;
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    if(native){Saving=Pending;SavingProfile=Profile;SaveCaptured=true;Log("Native disk-save snapshot captured.");}
+    else {if(Backups.size()>8)Backups.clear();Backups[buffer]={Profile,Pending};}
 }
-static bool __fastcall Load(DWORD* profile,void*,void* buffer,int size,bool commit,int player) {
-    const bool native=buffer==NativeSaveBuffer();
-    if(ControlsBeginLoad) ControlsBeginLoad();
-    bool result=OriginalLoad(profile,buffer,size,commit,player);
-    if(ControlsEndLoad) {
-        const std::string name=Name(reinterpret_cast<const char*>(profile));
-        ControlsEndLoad(name.c_str(),buffer,native,result&&profile==CurrentProfile(),commit,player);
-    }
-    if(result&&commit&&player==0&&profile==CurrentProfile()) {
-        std::lock_guard<std::mutex> lock(Mutex);
-        std::string name=Name(reinterpret_cast<const char*>(profile));
-        auto backup=Backups.find(buffer);
-        if(buffer!=NativeSaveBuffer()&&backup!=Backups.end()&&backup->second.profile==name) {
-            Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();
-        } else {LoadLocked(name);Backups.clear();}
-    }
-    return result;
+static void __cdecl OwnedSaveDone(void*,const char* name) {Commit(name);}
+static void __cdecl BeginOwnedLoad(void*) {}
+static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t native,uint32_t success,uint32_t commit,int32_t player) {
+    if(!success||!commit||player!=0)return;
+    std::lock_guard<std::mutex> lock(Mutex);
+    const std::string name=Name(profile);
+    auto backup=Backups.find(buffer);
+    if(!native&&backup!=Backups.end()&&backup->second.profile==name) {
+        Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();
+    } else {LoadLocked(name);Backups.clear();}
 }
+static const CustomizationProfileHost::Observer OwnedObserver={sizeof(CustomizationProfileHost::Observer),1,0x4F574E44,nullptr,
+    &BeginOwnedSave,&EndOwnedSave,&OwnedSaveDone,&BeginOwnedLoad,&EndOwnedLoad};
 static void __fastcall Build(DWORD* stable,void*,uint32_t handle,int player,DWORD* ride) {
     OriginalBuild(stable,handle,player,ride);
     if(!ride||player!=0||stable!=Stable()) return;
@@ -319,11 +294,9 @@ static DWORD* __fastcall NewCar(DWORD* stable,void*) {
 }
 static bool Install() {
     if(HooksReady) return true;
+    if(!CustomizationProfileHost::Install())return false;
     struct Hook {uintptr_t address;void* replacement;void** original;std::vector<unsigned char> bytes;};
     std::vector<Hook> hooks={
-        {0x58FD10,&Save,reinterpret_cast<void**>(&OriginalSave),{0x8B,0x54,0x24,4,0x53,0x55}},
-        {0x526AC0,&Done,reinterpret_cast<void**>(&OriginalDone),{0xE8,0xDB,0x5E,0x12,0,0x85,0xC0}},
-        {0x5ACB70,&Load,reinterpret_cast<void**>(&OriginalLoad),{0x83,0xEC,0x24,0x8B,0x44,0x24,0x28}},
         {0x5910E0,&Build,reinterpret_cast<void**>(&OriginalBuild),{0x8B,0x54,0x24,4,0x53,0x57}},
         {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}}
     };
@@ -339,7 +312,7 @@ static bool Install() {
     if(created==hooks.size()) {
         bool enabled=true;
         for(auto& hook:hooks) if(MH_EnableHook(reinterpret_cast<void*>(hook.address))!=MH_OK) {enabled=false;break;}
-        if(enabled) {HooksReady=true;Log("Verified native save/load and owned-car hooks installed.");return true;}
+        if(enabled&&CustomizationProfileHost::Register(OwnedObserver)) {HooksReady=true;Log("Owned-car hooks subscribed to native profile host.");return true;}
     }
     for(size_t i=0;i<created;++i) {MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}
     Log("Save extension disabled: hook transaction failed.");return false;
