@@ -12,6 +12,12 @@ static void Check(bool ok,const char* message) {if(!ok){std::cerr<<message<<'\n'
 static HRESULT WINAPI Folder(HWND,int,HANDLE,DWORD,char* path) {
     strcpy_s(path,MAX_PATH,directory.string().c_str());return S_OK;
 }
+static void __declspec(naked) NativeCustomizationCopyFixture() {
+    __asm { mov ecx,0x66
+        mov edi,eax
+        rep movsd
+        ret }
+}
 int main() {
     directory=fs::current_path()/("save-fixture-"+std::to_string(GetCurrentProcessId()));
     fs::create_directories(directory/"NFS Most Wanted"/"Alpha");
@@ -64,7 +70,18 @@ int main() {
         "AI usage and reused RideInfo allocation discard owned stance");
     std::array<BYTE,0x198> copied{};std::memcpy(copied.data(),customization,copied.size());
     Check(!BindRaceCustomization(ai.data(),copied.data(),0),"copied equipment or handle alone cannot prove ownership");
-    TrackCustomizationCopy(customization,copied.data());
+    OriginalCustomizationCopy=reinterpret_cast<void*>(&NativeCustomizationCopyFixture);
+    auto destination=copied.data();
+    __asm {
+        push esi
+        push edi
+        mov esi,customization
+        mov eax,destination
+        call CustomizationCopyCave
+        pop edi
+        pop esi
+    }
+    Check(std::memcmp(customization,copied.data(),copied.size())==0,"copy cave preserves native source/destination registers and 0x198-byte deep copy");
     Check(BindRaceCustomization(ai.data(),copied.data(),0),"observed native deep copy preserves exact owned lineage");
     copied[0]^=1;
     Check(!BindRaceCustomization(ai.data(),copied.data(),0),"changed/reused customization copy loses old lineage");
@@ -93,4 +110,5 @@ int main() {
     Check(!FolderCallTarget(redirectedCall,0x12345678),"Unknown directory patches disable sidecar I/O");
     Check(CompletedProfileName("C:\\Games\\SAVE\\Alpha\\Alpha")=="Alpha"&&CompletedProfileName("Alpha")=="Alpha", "PC completion filenames normalize without using incoming directories");
     std::cout<<"Save lifecycle, isolation, CRC and native-byte preservation passed\n";
+    return 0;
 }
