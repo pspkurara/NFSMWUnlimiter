@@ -87,11 +87,15 @@ and lifecycle fixtures pass, but actual race rendering, skid/smoke alignment,
 freeroam and durable game save/reload require live validation. Do not call this
 race integration verified merely because the build passes.
 
-The planned body-shop submenu, native sliders, grouped purchase/discard and
-configurable price (default zero) are not implemented yet. The temporary editor
-is debug-only and disabled until deliberately opted in. Vehicle-heading camera
-basis is implemented with legacy-state migration; mirror auto-hide remains
-pending and its new checkbox is disabled rather than pretending it works.
+The body-shop submenu and native sliders now exist in source with free grouped
+stage/discard, an isolated runtime clone of the installed tuning asset and no
+new top-level shop. Runtime testing exposed a missing package, then a title-only
+row rejection and invalid return ordinal; fixes are built but a successful full
+open/edit/discard/apply cycle is still required. Paid purchase is deferred.
+The temporary Windows editor remains debug-only and disabled until opted in.
+Vehicle-heading camera basis has legacy-state migration. Mirror auto-hide now
+uses guarded native view-mode decisions and leaves the saved Rearview setting
+unchanged; its scene/mask/reset behavior still needs runtime validation.
 
 Frontend ReInit (also used by its constructor) and LoadedRideInfo's native copy
 now propagate known RideInfo ownership. Allocation reuse drops stale associations;
