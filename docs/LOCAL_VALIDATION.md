@@ -103,3 +103,19 @@ unknown equal-equipment cars cannot borrow the selected global frontend record
 in the value resolver. Cached menus read current owned values every render rather
 than capturing stance at instance creation. Copy provenance is covered by fixtures;
 real menu transitions still require in-game confirmation.
+
+### Camera-only original-install update, 2026-11-17 06:49 JST
+
+The original REDUX installation now uses a selective build: baseline `18894c9`
+plus camera commits `ed59cb5`, `7d19940`, and `9ff541d`. The baseline's stance,
+native save lifecycle, and companion ASI are retained. Experimental native stance
+menu and race ownership changes are excluded. `tools/package_camera_update.py`
+exports this source combination, checks patch application and builds/tests it;
+all four baseline test suites passed, including legacy camera sidecar migration.
+
+Installed ASI SHA-256:
+`24463a2bf4580f7dfa3f99b35307480c06f8a21a9d910e61a66db6988abbb919`.
+Existing INIs and saves were untouched. Rollback receipt is in the workspace's
+`research/customization-original-backups/camera-20261117-064949/receipt.json`.
+Both new options remain opt-in. Build/fixture success does not verify heading or
+mirror behavior during a race; those live checks remain outstanding.

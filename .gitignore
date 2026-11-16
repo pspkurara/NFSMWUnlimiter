@@ -21,6 +21,7 @@ x86/
 bld/
 build-customization/
 dist/
+__pycache__/
 [Bb]in/
 [Oo]bj/
 
