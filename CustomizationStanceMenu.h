@@ -149,14 +149,19 @@ static void Text(unsigned hash,const char* text) {
     SetText(FEngFindObject(Package,hash),text);
 }
 static void Heading(const char* error=nullptr) {
-    const char* modes[]={"STANCE: BOTH | RB FINE | LB FAST | Y COPY",
-        "STANCE: FRONT | RB FINE | LB FAST | Y COPY","STANCE: REAR | RB FINE | LB FAST | Y COPY"};
+    const char* modes[]={"BOTH","FRONT","REAR"};
+    char caption[160]{};
+    const int channel=Screen?SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4])):-1;
+    if(channel>=0&&channel<6)
+        sprintf_s(caption,"STANCE: %s | %s [%.4g .. %.4g] %s",modes[EditSession.axle],Labels[channel],
+            double(EditSession.info.minimum[channel]),double(EditSession.info.maximum[channel]),channel==2?"deg":"m");
+    else sprintf_s(caption,"STANCE: %s | LT/RT AXLE | RB FINE | LB FAST",modes[EditSession.axle]);
     // These objects belong to our independent package clone. The race tuning
     // package and its labels remain untouched and every edit is restored on exit.
     // HEADERTEXT itself is a group in the stock PC asset. Update both actual
     // strings, including the drop shadow, rather than rejecting the group as text.
-    Text(bStringHash("HEADER_TEXT_MAIN"),error?error:modes[EditSession.axle]);
-    Text(bStringHash("HEADER_TEXT_SHADOW"),error?error:modes[EditSession.axle]);
+    Text(bStringHash("HEADER_TEXT_MAIN"),error?error:caption);
+    Text(bStringHash("HEADER_TEXT_SHADOW"),error?error:caption);
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
     Text(0x2FBBF8E8,"Copy");Text(0x55FA05C3,"Copy");
@@ -270,6 +275,7 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     case Left: case Right:
     case 0x9803F6E2: // native mouse navigation
         reinterpret_cast<NotifyFn>(0x5A96C0)(screen,message,object,p1,p2);
+        Heading();
         break;
     default: break;
     }

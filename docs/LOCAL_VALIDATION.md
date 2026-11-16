@@ -143,3 +143,25 @@ that grow/copy API. This final text fix still needs live verification.
 Repeated test exits followed by a separately launched original-install process
 interrupted end-to-end checks. The latest stance binaries remain confined to the
 development package/test copy; the original retains the camera-only update.
+
+### Height adjustment through garage scale/bias
+
+The user reported that a test Fiat lowered only its chassis. Source inspection
+found a rigid-only inverse in both height-root capture and part transformation;
+the native garage applies model scale and a Z-sort bias before those paths. Valid
+non-rigid roots could therefore disable the complete body-height transformation.
+The fix uses a checked affine inverse and caches the conjugated height transform
+once per car/view. Singular, ill-conditioned, projective and non-finite matrices
+still retain native geometry. This is a verified defect in the transform path;
+the Fiat symptom still needs a live reproduction check and is not declared fixed.
+
+Math fixtures cover rotated/transformed parts under nonuniform scale and shear,
+deep uniform lowering, and rejection of invalid roots. The editor now shows the
+selected channel's configured bounds in the heading, rather than adding another
+limiter switch. Saved absolute values retain their existing validation bounds.
+
+The user identified Claude as the source of concurrent original-game launches.
+Do not repeatedly close its game to make room for our tests. Keep the latest
+stance build in the private copy until coordinated runtime QA can proceed.
+Automatic stance selection is a separate pending feature; its native random-part
+and copy lifecycle is documented in STANCE_RANDOMIZATION.md.

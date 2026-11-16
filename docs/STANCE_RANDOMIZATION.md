@@ -1,0 +1,46 @@
+# Random stance lifecycle
+
+Status: design confirmed against native call sites; not implemented yet.
+
+Random stance must follow random part selection, never a render frame, camera
+change, or settings-file reload. The existing Unlimiter random-parts adapter is
+called from racer creation (5E8FE0) and Quick Race random selection (7B4907).
+Selection belongs after that adapter finishes, so body and wheel identity are final.
+An early return, including HPC paint-only compatibility, must still finish or clear
+the stance selection exactly once.
+
+Configuration will offer disabled, bounded random values, or a named preset pool.
+Defaults remain disabled. Automatic ranges are separate from the manual editor's
+ranges: widening a manual range to allow a grounded body must not also produce
+extreme AI cars. Presets outside automatic bounds must not enter the candidate pool.
+Missing channels inherit native/preset baselines. A selected preset is one grouped
+front/rear choice, not an independent mixture of unrelated presets per channel.
+
+## Carry the selection through native copies
+
+Quick Race constructs a temporary RideInfo, randomizes it, and gives it to CarViewer.
+On accept, the native frontend writes that ride to the temporary race customization
+record. Therefore a map attached only to the temporary RideInfo is insufficient.
+The verified PC transitions are:
+
+1. Random parts complete: generate one transient selection for that ride generation.
+2. RideInfo/loaded/frontend copies: carry the selection with the exact source copy.
+3. FECustomizationRecord::WriteRideIntoRecord (56F2F0): carry it into that record.
+4. Native customization deep copy (689361): carry it into the race copy.
+5. WriteRecordIntoRide (56F2B0) and race render-connection load: bind the selection
+   back to the resulting ride instance.
+
+Generation identity and part fingerprints must guard every transition. Rebuilding
+or rerolling a vehicle replaces its transient selection; profile/flow teardown and
+allocation reuse clear stale associations. Equal parts on another car are not an
+ownership or generation match. Reopening a menu or rendering smoke must not reroll.
+
+Transient AI/Quick Race selections must never be written to the owned-car sidecar
+or replace a saved owned-car record. The existing explicit owned-car save lifecycle
+continues independently. Optional host/companion ABI extensions should keep the
+sampler in the stance companion and native lifecycle adapters in the Unlimiter host.
+The feature must fail closed if a required copy hook has an unknown owner/layout.
+
+Required checks include reroll, accept, restart/replay without reroll, AI copies,
+identical cars, reused allocations, profile changes, missing companion, disabled
+random-parts integration, and preservation of owned save data.
