@@ -29,7 +29,7 @@ int main() {try {
     *reinterpret_cast<DWORD**>(FixtureAddress(0x91CF90))=database;
     std::array<uint8_t,32> before{},after{};Require(S::Digest(alpha/"Alpha",before),"hash native profile");
     auto target=alpha/"NFSMWCustomizationControls.bin";
-    C::ControlSession.active.enabled=1;C::ControlSession.active.keys[0]='J';
+    C::ControlSession.active.enabled=1;C::ControlSession.active.keys[0]='J';C::ControlSession.active.orbitMode=1;
     C::OnBeginSave(nullptr,true);C::OnEndSave(nullptr,true);C::OnSaveDone("Alpha");
     Require(!fs::exists(target),"save without native input writer cannot commit");
     C::WrittenState=C::ControlSession.active;C::WroteInput=true;
@@ -39,6 +39,15 @@ int main() {try {
     C::OnSaveDone("Alpha");Require(fs::exists(target),"native success commits sidecar");
     auto loaded=C::LoadState("Alpha");Require(loaded.enabled&&loaded.keys[0]=='J',"exact serialization snapshot roundtrip");
     Require(S::Digest(alpha/"Alpha",after)&&before==after,"native save bytes unchanged");
+    Require(loaded.orbitMode==1,"direction mode persists in actual sidecar");
+    C::State legacy=loaded;legacy.version=1;
+    C::FileHeader legacyHeader;legacyHeader.size=C::LegacyStateBytes;
+    legacyHeader.crc=S::Crc(&legacy,C::LegacyStateBytes);std::memcpy(legacyHeader.digest,before.data(),32);
+    {std::ofstream file(target,std::ios::binary|std::ios::trunc);
+        file.write(reinterpret_cast<const char*>(&legacyHeader),sizeof(legacyHeader));
+        file.write(reinterpret_cast<const char*>(&legacy),C::LegacyStateBytes);}
+    auto migrated=C::LoadState("Alpha");
+    Require(migrated.version==2&&migrated.keys[0]=='J'&&migrated.orbitMode==0,"version-1 disk settings migrate to rate mode");
     C::OnBeginLoad();C::OnEndLoad("Beta",nullptr,true,true,true,0);
     Require(C::Runtime().keys[0]=='K',"profile creation without input reader preserves active configuration");
     C::ReadInput=true;auto generation=C::ScreenGeneration;

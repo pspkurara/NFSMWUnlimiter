@@ -51,7 +51,7 @@ Experimental race orbit operates on the main player's Cubic camera look-at
 construction, after its normal camera calculations. Horizontal rotation covers
 360 degrees; vertical rotation is bounded; an optional reset binding resets
 both axes. Reset ships unbound to avoid the native right-stick-click camera-view
-action. With `[RaceOrbit] ResetOnLookBack=1` (default), the native remapped
+action. In Rate mode, with `[RaceOrbit] ResetOnLookBack=1` (default), the native remapped
 look-back action clears the orbit and keeps the stock view while held, including
 when the orbit stick is moved simultaneously. Releasing look-back leaves the
 orbit centered. This uses the verified Cubic action flag, not an Xbox button
@@ -114,3 +114,20 @@ Required manual checks: attachments with left-stick navigation and right-stick
 rotation; simultaneous stick use; camera disconnect/focus loss; driver selection,
 cancel and purchase; leaving the shop; pause/cutscene transitions; race orbit
 reset/recentering; both stock and add-on cars; other installed camera/input mods.
+
+## View changes and first-person geometry
+
+Rate mode also centers on verified native POV, anchor or lag-basis changes when
+`[RaceOrbit] ResetOnViewChange=1` (default), waiting for neutral axes before
+resuming. Direction mode composes with native look-back and view changes without
+these automatic resets. Mode changes, focus loss and mover inactivity still
+clear runtime state. See [mode settings](CustomizationControls.md).
+
+The PC Cubic POV indices identify bumper as 0 and hood as 1. For these native
+first-person paths the camera eye stays fixed while the look direction rotates;
+external views orbit their native target. During a transition involving either
+first-person POV, fixed-eye rotation remains selected. `FixedEyePovMask=3`
+selects these two bits. A cockpit MOD replacing another POV can select its bit;
+a generic cockpit marker is not inferred from car meshes. If the native POV
+layout signatures do not match, automatic POV handling is disabled. These paths
+and combinations still require game-level visual confirmation.

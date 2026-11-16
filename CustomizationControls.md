@@ -64,3 +64,22 @@ Tests cover camera-only dirty detection, discard, device reset, actual sidecar
 serialization, exact save snapshots, temporary-buffer identity, no-reader profile
 creation, partial input streams, CRC and native revision rejection. Live input and native UI behavior
 still require testing in the game on the available Windows 11 installation.
+
+## Orbit modes and sidecar migration
+
+The F7 dialog offers Rate orbit (the existing incremental yaw/pitch behavior) and
+Direction mode. Direction mode treats the chosen X/Y pair as horizontal azimuth:
+forward is the native view, right is +90 degrees and back is 180 degrees. Holding
+the stick does not accumulate rotation; releasing it returns to the native view.
+Both axes therefore describe direction rather than vertical pitch in this mode;
+the optional keyboard axis bindings use the same selected interpretation.
+Native look-back and POV/basis changes compose with direction mode. Rate mode
+centers on native look-back or POV/anchor/lag changes by default. A view change
+waits for neutral input before another rate orbit so a held stick does not undo
+that change immediately.
+
+State version 2 appends the mode to the 72-byte version-1 prefix. Loading a legacy
+sidecar verifies its original length, CRC and native revision before migrating
+to Rate mode, retaining its bindings and tuning. Unknown payload versions and
+sizes are rejected. The next successful save writes the new 76-byte payload;
+this does not alter native save bytes.

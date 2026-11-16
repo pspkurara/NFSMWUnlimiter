@@ -48,3 +48,20 @@ No-reader profile creation preserves active settings. See
 MSVC builds and standalone state/sidecar lifecycle tests pass. These tests do not
 execute the real native FNG UI or establish live hook correctness. Accept/cancel,
 device defaults, load/create/restart and controller input need in-game testing.
+
+## Native camera ownership evidence
+
+The inspected PC executable identifies Cubic look-back at byte `+0xA1` through
+setter `0x4741A0`, getter `0x4741D0` and the Update read at `0x47D7ED`.
+Cubic `SetPovType` at `0x46B050` compares the requested POV against current
+`+0x9C` and writes desired `+0x98` at `0x46B0A9`. Constructor `0x481BD0`
+initializes both fields and stores its CameraAnchor argument at `+0x80`
+(`0x481C1D`). `SetDisableLag` writes `+0xA0` at `0x4741B9`.
+The runtime guards match these specific instructions before using the fields.
+This detects state changes after native remapping; it does not guess physical
+controller button assignments or overwrite the native action dispatch.
+
+`CameraInfo.hpp` names bumper/hood POV values 0/1 and external values 2..6;
+the PC setter's grouping also treats 2..6 as the external group. A MOD's added
+cockpit replacement is not automatically identifiable from that naming alone.
+Fixed-eye selection therefore has an explicit POV bitmask override.

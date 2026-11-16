@@ -30,7 +30,7 @@ static std::map<void*,Backup> Backups;
 static std::atomic<HWND> Dialog{nullptr};
 static HWND Message=nullptr;
 static HWND EnabledBox=nullptr,InvertXBox=nullptr,InvertYBox=nullptr,YawBox=nullptr,PitchBox=nullptr;
-static HWND ControllerBox=nullptr,ResetBox=nullptr;
+static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr;
 static std::array<HWND,5> Keys{},Tuning{};
 static DWORD(WINAPI* PadState)(DWORD,XINPUT_STATE*)=nullptr;
 
@@ -75,14 +75,15 @@ static State LoadState(const std::string& name) {
     try {
         auto directory=CustomizationSave::ProfileDirectory(name);if(directory.empty())return state;
         std::ifstream stream(directory/L"NFSMWCustomizationControls.bin",std::ios::binary);
-        FileHeader header{};State candidate{};
+        FileHeader header{};State candidate{},decoded{};
         stream.read(reinterpret_cast<char*>(&header),sizeof(header));
-        stream.read(reinterpret_cast<char*>(&candidate),sizeof(candidate));
+        if(!stream||std::memcmp(header.magic,"MWCLIN1",8)||header.version!=1||header.reserved||
+            (header.size!=sizeof(State)&&header.size!=LegacyStateBytes))return state;
+        stream.read(reinterpret_cast<char*>(&candidate),header.size);
         std::array<uint8_t,32> digest{};
-        if(stream&&stream.peek()==EOF&&!std::memcmp(header.magic,"MWCLIN1",8)&&header.version==1&&
-            header.size==sizeof(State)&&header.reserved==0&&Valid(candidate)&&
-            header.crc==CustomizationSave::Crc(&candidate,sizeof(candidate))&&
-            CustomizationSave::Digest(directory/name,digest)&&!std::memcmp(header.digest,digest.data(),32))state=candidate;
+        if(stream&&stream.peek()==EOF&&header.crc==CustomizationSave::Crc(&candidate,header.size)&&
+            DecodeState(&candidate,header.size,decoded)&&
+            CustomizationSave::Digest(directory/name,digest)&&!std::memcmp(header.digest,digest.data(),32))state=decoded;
     }catch(...){CustomizationSave::Log("Input sidecar read failed; safe defaults selected.");}
     return state;
 }
@@ -159,6 +160,7 @@ static HWND Child(const wchar_t* type,const std::wstring& text,DWORD style,int x
     SendMessageW(result,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);return result;
 }
 static void Populate(const State& s){
+    SendMessageW(ModeBox,CB_SETCURSEL,s.orbitMode,0);
     SendMessageW(EnabledBox,BM_SETCHECK,s.enabled?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(InvertXBox,BM_SETCHECK,s.invertX?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(InvertYBox,BM_SETCHECK,s.invertY?BST_CHECKED:BST_UNCHECKED,0);
@@ -177,7 +179,7 @@ static bool Integer(HWND box,uint32_t& out,bool key=false){
     if(end==text.c_str()||*end)return false;out=result;return true;
 }
 static bool ApplyDialog(bool saveNow=false){
-    State next;next.enabled=SendMessageW(EnabledBox,BM_GETCHECK,0,0)==BST_CHECKED;
+    State next;next.orbitMode=uint32_t(SendMessageW(ModeBox,CB_GETCURSEL,0,0));next.enabled=SendMessageW(EnabledBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.invertX=SendMessageW(InvertXBox,BM_GETCHECK,0,0)==BST_CHECKED;next.invertY=SendMessageW(InvertYBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.yawAxis=uint32_t(SendMessageW(YawBox,CB_GETCURSEL,0,0));next.pitchAxis=uint32_t(SendMessageW(PitchBox,CB_GETCURSEL,0,0));
     if(!Integer(ControllerBox,next.controller)||!Integer(ResetBox,next.resetButtons))return false;
@@ -214,7 +216,7 @@ static void OpenDialog(){
     {std::lock_guard<std::mutex> lock(ControlMutex);if(!Screen&&!AllowLiveEditing)return;
         DialogProfile=CurrentName();if(!CustomizationSave::ValidName(DialogProfile))return;
         DialogLive=!Screen;snapshot=ControlSession.active;DialogGeneration=ScreenGeneration;}
-    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,590,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,635,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     EnabledBox=Child(L"BUTTON",L"Enable race 360 degree camera",BS_AUTOCHECKBOX,16,16,400,25);
     Child(L"STATIC",DialogLive?L"Apply changes now, or use Save and apply to keep them with this profile.":L"Return to the game and confirm your control changes after Apply.",0,16,48,770,25);
     Child(L"STATIC",L"Controller index (0..3)",0,16,85,180,24);ControllerBox=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,210,82,100,25);
@@ -229,9 +231,13 @@ static void OpenDialog(){
     for(int i=0;i<5;++i){int y=85+i*38;Child(L"STATIC",keyNames[i],0,420,y,200,24);Keys[i]=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,640,y-3,140,25);
         int ty=285+i*33;Child(L"STATIC",tuningNames[i],0,16,ty,220,24);Tuning[i]=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,250,ty-3,140,25);}
     Child(L"STATIC",L"Keys: A..Z or Windows VK number/hex. 0 = unbound.\nArrows: left 0x25, up 0x26, right 0x27, down 0x28.\nPad reset: right thumb 128, left thumb 64, Back 32.\nBindings may overlap driving actions: choose unused inputs.",0,420,285,360,95);
-    Message=Child(L"STATIC",L"Profile changes retain these settings unless the native input reader loads another configuration.",0,16,458,770,40);
-    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,510,230,30,4);
-    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,510,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,510,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,510,120,30,3);
+    Child(L"STATIC",L"Stick mode",0,420,405,120,25);
+    ModeBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,540,402,240,130);
+    SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Rate orbit (UG2 style)"));
+    SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Direction: release to center"));
+    Message=Child(L"STATIC",L"Direction mode uses both axes for horizontal direction; native look-back can run alongside it.",0,16,470,770,40);
+    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,550,230,30,4);
+    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,550,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,550,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,550,120,30,3);
     Populate(snapshot);ShowWindow(Dialog,SW_SHOW);SetForegroundWindow(Dialog);
 }
 static DWORD WINAPI RunUI(void*){

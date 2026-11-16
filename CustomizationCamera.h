@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include "includes\injector\injector.hpp"
 #include "CustomizationControls.h"
+#include "CustomizationOrbitMath.h"
 
 // Optional, independently guarded hooks for the PC 1.3 executable. No preview
 // state is written to RideInfo, the profile, or a game save.
@@ -17,6 +18,8 @@ namespace CustomizationCamera
         bool garage = true;
         bool driverPreview = true;
         bool resetOnLookBack = true;
+        bool resetOnViewChange = true;
+        unsigned fixedEyePovMask = 3;
         bool leftStick = false;
         bool invertX = false;
         bool invertY = false;
@@ -31,6 +34,7 @@ namespace CustomizationCamera
     static bool GarageControlled = false;
     static bool Installed = false;
     static bool NativeLookBackVerified = false;
+    static bool NativeViewVerified = false;
     static DWORD(__stdcall* GetPadState)(DWORD, XINPUT_STATE*) = nullptr;
 
     // A separate ASI may supply normalized, already mapped stick input through
@@ -239,6 +243,12 @@ namespace CustomizationCamera
     static float Yaw = 0, Pitch = 0;
     static ULONGLONG LastOrbitTick = 0, LastOrbitInput = 0;
     static void* LastMover = nullptr;
+    static bool WaitForNeutral = false;
+    struct ViewStamp { uintptr_t anchor=0; int desired=0,current=0; BYTE lag=0; };
+    static ViewStamp LastView;
+    static bool SameView(const ViewStamp& a,const ViewStamp& b) {
+        return a.anchor==b.anchor&&a.desired==b.desired&&a.current==b.current&&a.lag==b.lag;
+    }
 
     static float ApproachZero(float value, float step)
     {
@@ -256,19 +266,38 @@ namespace CustomizationCamera
         const auto controls = CustomizationControls::Runtime();
         static CustomizationControls::State lastControls;
         if(!CustomizationControls::Equal(lastControls,controls)) {
-            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;
+            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;
         }
         if (!controls.enabled || *reinterpret_cast<int*>(0x925E90) != 6 || !mainView ||
             !CustomizationControls::ReadOrbit(controls, x, y, reset))
         {
             Yaw = Pitch = 0;
             LastOrbitTick = 0;
+            WaitForNeutral = false;
             original(matrix, eye, look, up);
             return;
         }
+        const bool directionMode=controls.orbitMode==1;
+        ViewStamp view;
+        if(NativeViewVerified) {
+            const auto bytes=static_cast<const BYTE*>(mover);
+            view.anchor=*reinterpret_cast<const uintptr_t*>(bytes+0x80);
+            view.desired=*reinterpret_cast<const int*>(bytes+0x98);
+            view.current=*reinterpret_cast<const int*>(bytes+0x9C);
+            view.lag=bytes[0xA0];
+        }
+        const bool viewChanged=LastOrbitTick&&
+            (LastMover!=mover||(NativeViewVerified&&!SameView(view,LastView)));
+        LastView=view;
+        if(!directionMode&&Config.resetOnViewChange&&viewChanged)WaitForNeutral=true;
+        if(WaitForNeutral&&!directionMode) {
+            Yaw=Pitch=0;LastMover=mover;LastOrbitTick=LastOrbitInput=now;
+            if(x==0&&y==0)WaitForNeutral=false;
+            original(matrix,eye,look,up);return;
+        }
         // Read the action after native key mapping, not a fixed controller button.
         // While held, stock look-back owns the view even if the orbit stick moves.
-        if (Config.resetOnLookBack && NativeLookBackVerified &&
+        if (!directionMode && Config.resetOnLookBack && NativeLookBackVerified &&
             *reinterpret_cast<const BYTE*>(static_cast<const BYTE*>(mover) + 0xA1))
         {
             Yaw = Pitch = 0;
@@ -286,10 +315,9 @@ namespace CustomizationCamera
         float dt = LastOrbitTick ? Clamp(float(now - LastOrbitTick) * 0.001f, 0, 0.1f) : 0;
         LastOrbitTick = now;
         if (reset) Yaw = Pitch = 0;
-        else if (x != 0 || y != 0)
+        else if (directionMode || x != 0 || y != 0)
         {
-            Yaw = std::remainder(Yaw + x * controls.speed * dt, 360.0f);
-            Pitch = Clamp(Pitch + y * controls.speed * dt, -controls.pitchLimit, controls.pitchLimit);
+            CustomizationControls::ApplyAxes(controls,x,y,dt,Yaw,Pitch);
             LastOrbitInput = now;
         }
         else if (controls.returnDelay >= 0 && now - LastOrbitInput >= ULONGLONG(controls.returnDelay * 1000))
@@ -302,22 +330,17 @@ namespace CustomizationCamera
             original(matrix, eye, look, up);
             return;
         }
-        // eCreateLookAtMatrix uses render-space coordinates (Z is up). The stock
-        // target and distance are retained; the stock camera resumes each frame.
-        float dx = eye->x - look->x, dy = eye->y - look->y, dz = eye->z - look->z;
-        float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (!std::isfinite(distance) || distance < 0.05f)
-        {
-            original(matrix, eye, look, up);
-            return;
+        const bool fixedEye=NativeViewVerified&&
+            ((view.desired>=0&&view.desired<32&&(Config.fixedEyePovMask&(1u<<view.desired)))||
+             (view.current>=0&&view.current<32&&(Config.fixedEyePovMask&(1u<<view.current))));
+        const CustomizationOrbit::Pose native={{eye->x,eye->y,eye->z},{look->x,look->y,look->z}};
+        CustomizationOrbit::Pose rotated;
+        if(!CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated)) {
+            original(matrix,eye,look,up);return;
         }
-        constexpr float radians = 0.01745329251994329577f;
-        float azimuth = std::atan2(dy, dx) + Yaw * radians;
-        float elevation = Clamp(std::atan2(dz, std::sqrt(dx * dx + dy * dy)) + Pitch * radians, -1.4f, 1.4f);
-        float horizontal = distance * std::cos(elevation);
-        Vec orbitEye = {look->x + horizontal * std::cos(azimuth), look->y + horizontal * std::sin(azimuth),
-                        look->z + distance * std::sin(elevation), 0};
-        original(matrix, &orbitEye, look, up);
+        const Vec orbitEye={rotated.eye.x,rotated.eye.y,rotated.eye.z,0};
+        const Vec orbitLook={rotated.look.x,rotated.look.y,rotated.look.z,0};
+        original(matrix,&orbitEye,&orbitLook,up);
     }
 
     static void __declspec(naked) OrbitLookAtCave()
@@ -344,6 +367,8 @@ namespace CustomizationCamera
         Config.garage = settings.ReadInteger("Garage", "Enabled", 1) != 0;
         Config.driverPreview = settings.ReadInteger("Garage", "PreviewDriver", 1) != 0;
         Config.resetOnLookBack = settings.ReadInteger("RaceOrbit", "ResetOnLookBack", 1) != 0;
+        Config.resetOnViewChange = settings.ReadInteger("RaceOrbit", "ResetOnViewChange", 1) != 0;
+        Config.fixedEyePovMask = unsigned(settings.ReadInteger("RaceOrbit", "FixedEyePovMask", 3));
         Config.leftStick = settings.ReadInteger("Input", "CameraStick", 1) == 0;
         Config.invertX = settings.ReadInteger("Input", "InvertX", 0) != 0;
         Config.invertY = settings.ReadInteger("Input", "InvertY", 0) != 0;
@@ -395,6 +420,15 @@ namespace CustomizationCamera
             Matches(0x4741D0,lookBackGetter) && Matches(0x47D7ED,lookBackUpdate);
         if (Config.resetOnLookBack && !NativeLookBackVerified)
             Report("Native look-back layout not verified; automatic orbit reset disabled.");
+
+        const unsigned char povRead[]={0x8B,0x81,0x9C,0,0,0,0x8B,0x54,0x24,4};
+        const unsigned char povWrite[]={0x89,0x91,0x98,0,0,0};
+        const unsigned char anchorWrite[]={0x89,0x8E,0x80,0,0,0};
+        const unsigned char lagWrite[]={0x88,0x81,0xA0,0,0,0};
+        NativeViewVerified=Matches(0x46B050,povRead)&&Matches(0x46B0A9,povWrite)&&
+            Matches(0x481C1D,anchorWrite)&&Matches(0x4741B9,lagWrite);
+        if(!NativeViewVerified)
+            Report("Native POV layout not verified; view-change reset and fixed-eye selection disabled.");
 
         const unsigned char orbitCall[] = {0xE8, 0xDF, 0x13, 0x25, 0};
         const unsigned char moverView[] = {0x8B, 0x4E, 0x10};
