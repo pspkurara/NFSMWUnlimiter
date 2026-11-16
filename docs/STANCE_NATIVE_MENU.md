@@ -1,8 +1,10 @@
 # Body-shop stance menu
 
 Status: implemented in source; native entry/slider/return behavior still requires
-runtime validation. The first test exposed a missing pause-package crash; the
-current implementation registers a separate template before exposing the entry.
+runtime validation. Runtime tests exposed a missing pause-package crash, followed by an optional
+numeric-label rejection and invalid return-selection crash. The current source
+registers a separate template, accepts title-only slider rows and restores a
+verified menu ordinal. These fixes still require a successful end-to-end test.
 Do not treat successful builds or unit tests as in-game compatibility evidence.
 
 ## Entry and assets
@@ -26,6 +28,10 @@ layouts or would delete the stance sliders. Modified FEString labels are copied
 and restored before the native screen destructor; the shared title is untouched.
 
 ## Session and confirmation
+
+Native templates without OPTION_DATA_n show absolute values inside each row
+title. Returning to Parts uses the actual appended one-based option position;
+the extension category ID is never interpreted as a native selection ordinal.
 
 Seven native slider rows expose height, half-track, camber, complete wheel width,
 tire radius, brake inset and the global enabled flag. Left/right adjusts the

@@ -19,7 +19,7 @@ constexpr unsigned Left=0x9120409E,Right=0xB5971BF1,PreviousAxle=0x5073EF13,Next
 constexpr unsigned Inherit=0xC519BFC4,ExitComplete=0xE1FDE1D1;
 static bool Installed=false,Constructing=false,BuildRequested=false,Opening=false,Closing=false,Finished=false;
 static DWORD* Screen=nullptr;
-static unsigned NameHash=0,PackageHash=0,OpeningArgs=0;
+static unsigned NameHash=0,PackageHash=0,OpeningArgs=0,ReturnArgs=1,ReturnIndex=1;
 static void* OriginalDispatch=nullptr;
 static void(__cdecl* OriginalLanguage)(DWORD*,unsigned)=nullptr;
 static std::vector<uint8_t> TemplateChunk;
@@ -66,7 +66,7 @@ static DrawFn OriginalDraw=nullptr;
 static ActFn OriginalAct=nullptr;
 static ReactFn OriginalReact=nullptr;
 
-static const char* Labels[]={"Ride height (m)","Half-track / offset (m)","Camber (degrees)","Wheel / tire width (m)","Tire radius (m)","Brake inset (m)"};
+static const char* Labels[]={"Height m","Half-track m","Camber deg","Width m","Radius m","Brake inset m"};
 static bool Core() {
     if(Begin&&Control)return true;
     auto module=GetModuleHandleA("NFSMWCustomizationLab.asi");if(!module)return false;
@@ -144,15 +144,21 @@ static void __fastcall Draw(DWORD* slider,void*) {
     if(!Screen||index<0)return;
     auto title=reinterpret_cast<DWORD*>(slider[0x2C/4]);
     auto data=reinterpret_cast<DWORD*>(slider[0x30/4]);
-    if(!title||!data||title[0]!=0x89B05C||data[0]!=0x89B05C)return;
-    if(index==6) {
-        FEPrintf_obj(title,"%s","Enable stance overrides");FEPrintf_obj(data,"%s",EditSession.enabled?"ON":"OFF");return;
+    if(!title||title[0]!=0x89B05C)return;
+    const bool separate=data&&data[0]==0x89B05C;
+    char value[96]{};
+    if(index==6)sprintf_s(value,"%s",EditSession.enabled?"ON":"OFF");
+    else {
+        const unsigned axle=EditSession.axle==2?1:0,i=unsigned(index)*2+axle;
+        if(!EditSession.axle&&EditSession.Value(index,0)!=EditSession.Value(index,1))
+            sprintf_s(value,"%.4g / %.4g",double(EditSession.Value(index,0)),double(EditSession.Value(index,1)));
+        else sprintf_s(value,"%.4g%s",double(EditSession.Value(index,axle)),(EditSession.active.mask&(1u<<i))?"":" (inherit)");
     }
-    FEPrintf_obj(title,"%s",Labels[index]);
-    unsigned axle=EditSession.axle==2?1:0,i=unsigned(index)*2+axle;
-    if(!EditSession.axle&&EditSession.Value(index,0)!=EditSession.Value(index,1))
-        FEPrintf_obj(data,"%.4g / %.4g",double(EditSession.Value(index,0)),double(EditSession.Value(index,1)));
-    else FEPrintf_obj(data,"%.4g%s",double(EditSession.Value(index,axle)),(EditSession.active.mask&(1u<<i))?"":" (inherit)");
+    const char* label=index==6?"Stance overrides":Labels[index];
+    // The stock tuning asset may omit OPTION_DATA_n. Its title is still a
+    // complete usable row: include the absolute value there instead of rejecting it.
+    FEPrintf_obj(title,separate?"%s":"%s: %s",label,value);
+    if(separate)FEPrintf_obj(data,"%s",value);
 }
 static void Refresh() {
     for(unsigned i=0;i<7;++i)if(auto slider=Sliders[i]) {
@@ -197,7 +203,7 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     if(message==ExitComplete) {
         if(!Finished)Cancel();
         auto queue=reinterpret_cast<void(__thiscall*)(void*,const char*,unsigned,unsigned,bool)>(0x525940);
-        queue(*reinterpret_cast<void**>(0x91CADC),Parent.empty()?*reinterpret_cast<const char**>(g_pCustomizeSubPkg):Parent.c_str(),1|(Category<<16),0,false);
+        queue(*reinterpret_cast<void**>(0x91CADC),Parent.empty()?*reinterpret_cast<const char**>(g_pCustomizeSubPkg):Parent.c_str(),ReturnArgs,0,false);
         return;
     }
     if(Closing)return;
@@ -243,8 +249,10 @@ static void __fastcall Setup(DWORD* screen,void*) {
         // PC UIWidgetMenu::Options tail is +30; bTNode is embedded at widget+4.
         auto node=reinterpret_cast<DWORD*>(screen[0x30/4]);
         auto slider=node?node-1:nullptr;
-        if(!slider||slider[0]!=0x8A1548||!slider[0x2C/4]||!slider[0x30/4]||!slider[0x5C/4]) {
-            CustomizationSave::Log("Stance menu template missing required slider objects.");Cancel();return;
+        if(!slider||slider[0]!=0x8A1548||!slider[0x2C/4]||!slider[0x5C/4]) {
+            char detail[200]{};sprintf_s(detail,"Stance template row %d invalid: widget=%p vtable=%08X title=%08X data=%08X group=%08X",i,
+                slider,slider?slider[0]:0,slider?slider[0x2C/4]:0,slider?slider[0x30/4]:0,slider?slider[0x5C/4]:0);
+            CustomizationSave::Log(detail);Cancel();return;
         }
         *reinterpret_cast<BYTE*>(reinterpret_cast<BYTE*>(slider)+0xF0)=1;
         Sliders[i]=slider;
@@ -277,6 +285,7 @@ static void __fastcall React(DWORD* option,void*,const char* parent,unsigned mes
     if(!EditSession.Begin(info,initial)){Control(info.token,2,0);return;}
     Owner=owner;Finished=false;Closing=false;Opening=true;OpenedAt=GetTickCount64();
     OpeningArgs=option[0x50/4];Parent=parent?parent:"";
+    ReturnArgs=(OpeningArgs>>16)|(ReturnIndex<<16);
     OriginalReact(option,parent,message,object,p1,p2);
 }
 static void __cdecl Language(DWORD* object,unsigned hash) {
@@ -320,6 +329,10 @@ void AddPartsOption(DWORD* screen) {
     option[0]=0x8B7558;option[0x4C/4]=reinterpret_cast<DWORD>(Package);
     option[0x50/4]=Category|(screen[0x150/4]<<16);option[0x54/4]=1;
     IconScrollerMenu_AddOption(screen,option);
+    // CustomizeSub restores a one-based menu ordinal, not a synthetic category ID.
+    // Its IconPanel embeds bList at screen+30 (native RefreshHeader 7B1640).
+    const int count=bList_TraversebList(reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(screen)+0x30),nullptr);
+    ReturnIndex=count>0&&count<=255?unsigned(count):1;
 }
 static bool Install() {
     if(Installed)return true;
