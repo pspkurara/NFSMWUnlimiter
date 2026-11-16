@@ -39,6 +39,15 @@ static void Remember(DWORD* object) {
     if(length==2048)return; // Replaced assets must not cause an unbounded copy.
     SavedStrings.push_back({object,object[0x10/4],object[0x60/4],object[0x1C/4],text?std::wstring(text,length):L""});
 }
+static void SetText(DWORD* object,const char* text,bool remember=true) {
+    if(!object||object[0]!=0x89B05C)return;
+    wchar_t wide[512]{};
+    if(!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text,-1,wide,int(std::size(wide))))return;
+    if(remember)Remember(object);
+    // FEPrintf truncates to FEWideString's existing capacity (PC 515D20).
+    // FESetString invokes its native grow/copy path, including null buffers.
+    reinterpret_cast<void(__cdecl*)(DWORD*,const wchar_t*)>(0x515CC0)(object,wide);
+}
 static void RestoreText() {
     for(const auto& saved:SavedStrings) {
         auto object=FEngFindObject(Package,saved.name);
@@ -137,7 +146,7 @@ static int SliderIndex(DWORD* slider) {
     return -1;
 }
 static void Text(unsigned hash,const char* text) {
-    if(auto object=FEngFindObject(Package,hash);object&&object[0]==0x89B05C){Remember(object);FEPrintf_obj(object,"%s",text);}
+    SetText(FEngFindObject(Package,hash),text);
 }
 static void Heading(const char* error=nullptr) {
     const char* modes[]={"STANCE: BOTH | RB FINE | LB FAST | Y COPY",
@@ -176,8 +185,8 @@ static void __fastcall Draw(DWORD* slider,void*) {
     const char* label=index==6?"Enabled":Labels[index];
     // The stock tuning asset may omit OPTION_DATA_n. Its title is still a
     // complete usable row: include the absolute value there instead of rejecting it.
-    FEPrintf_obj(title,separate?"%s":"%s: %s",label,value);
-    if(separate)FEPrintf_obj(data,"%s",value);
+    char caption[160]{};sprintf_s(caption,separate?"%s":"%s: %s",label,value);
+    SetText(title,caption);if(separate)SetText(data,value);
 }
 static void Refresh() {
     for(unsigned i=0;i<7;++i)if(auto slider=Sliders[i]) {
@@ -321,7 +330,7 @@ static void __fastcall React(DWORD* option,void*,const char* parent,unsigned mes
 }
 static void __cdecl Language(DWORD* object,unsigned hash) {
     OriginalLanguage(object,hash);
-    if(object&&hash==NameHash)FEPrintf_obj(object,"%s","Stance adjustment");
+    if(object&&hash==NameHash)SetText(object,"Stance adjustment",false);
 }
 static DWORD* __cdecl CreateScreen(DWORD* package,unsigned args) {
     CustomizationSave::Log("Independent stance screen factory selected.");

@@ -22,6 +22,10 @@ ordinary race bundle unloader. Missing/unsupported templates suppress the entry.
 Native pause tuning keeps its original package and factory. The stance adapter
 never calls native physics Setup, StoreSettings or tuning notifications.
 
+Text writes use native FESetString (PC 515CC0), which grows FEWideString safely;
+FEPrintf alone truncates text to the source asset's existing capacity. The header
+group's HEADER_TEXT_MAIN/SHADOW children are edited rather than the group itself.
+
 Only verified widget navigation/redraw notifications are forwarded. Native text
 editing and ResetScreen notifications are blocked: they assume other widget
 layouts or would delete the stance sliders. Modified FEString labels are copied

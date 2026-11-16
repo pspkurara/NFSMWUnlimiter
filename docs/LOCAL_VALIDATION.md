@@ -119,3 +119,27 @@ Existing INIs and saves were untouched. Rollback receipt is in the workspace's
 `research/customization-original-backups/camera-20261117-064949/receipt.json`.
 Both new options remain opt-in. Build/fixture success does not verify heading or
 mirror behavior during a race; those live checks remain outstanding.
+
+### Stance controls, 2026-11-17
+
+The isolated test reached the native stance editor and logged all seven sliders
+ready; the user reported that it appeared to work. Subsequent screen captures
+confirmed compact numeric labels and the enabled flag. This does not yet establish
+a complete edit/discard/apply/native-save/reload/race cycle.
+
+Added configurable normal/fine/fast multipliers, per-channel opposite-axle copy,
+and synchronization of only the channel explicitly edited in both-axle mode.
+Page switches preserve all values and the last individual axle supplies the linked
+reference. Geometry edits enable the preview; cancel retains the existing rollback.
+Pure session tests cover copy isolation, inherited sources, saved absolute values
+outside new UI ranges, linked synchronization and invalid multipliers.
+
+The stock HEADERTEXT is a group, not an FEString; its real string children were
+identified in the installed tuning asset. Runtime inspection also exposed title
+truncation. Read-only PC disassembly confirmed FEPrintf's existing-capacity limit
+(515D20) and FESetString's native grow/copy path (515CC0 to 5BCD20). Labels now use
+that grow/copy API. This final text fix still needs live verification.
+
+Repeated test exits followed by a separately launched original-install process
+interrupted end-to-end checks. The latest stance binaries remain confined to the
+development package/test copy; the original retains the camera-only update.
