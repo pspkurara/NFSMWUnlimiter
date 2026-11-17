@@ -228,7 +228,10 @@ static float Resolve(DWORD* ride,int axle,int channel,float fallback) {
     EnsureProfileLocked(); Key key;
     if(!IdentityLocked(ride,key,false)) return fallback;
     const Values* value=nullptr;
-    auto preview=Preview.find(key);if(preview!=Preview.end()) value=&preview->second;
+    // Tire/contact updates can run before the first race Render clears the
+    // editor context. An unfinished frontend preview must never affect racing.
+    auto preview=Preview.find(key);
+    if(*reinterpret_cast<const int*>(GlobalAddress(0x925E90))==3&&preview!=Preview.end()) value=&preview->second;
     else {auto pending=Pending.find(key);if(pending!=Pending.end()) value=&pending->second;}
     unsigned bit=unsigned(channel*2+axle);
     return value && (value->mask&(1u<<bit)) ? value->values[bit] : fallback;

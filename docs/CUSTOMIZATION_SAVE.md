@@ -36,3 +36,9 @@ actual sidecar serialization, atomic commit, CRC and hash checks, native-byte
 preservation, profile changes, preview/staging, stale token and identical AI
 rejection. It does not execute native game hooks or establish their runtime ABI
 beyond the inspected PC symbol signatures. Real-game confirmation is mandatory.
+
+Unconfirmed previews resolve only in frontend game flow 3. Tire/contact updates
+can precede the first race Render that clears the editor context; flow 6 must
+therefore resolve the confirmed Pending value even while a stale Preview entry
+still exists. The fixture covers immediate frontend preview, a native-save
+snapshot excluding it, the first race resolve before cleanup, and discard.

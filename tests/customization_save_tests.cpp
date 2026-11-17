@@ -56,6 +56,18 @@ int main() {
     std::vector<DWORD> ride(0xc4);ride[0]=123;
     Rides[ride.data()]={key,Fingerprint(ride.data())};
     Check(Resolve(ride.data(),0,2,0)==-2.5f,"Known owned ride resolves");
+    Tokens[key]=9;ActiveEditorToken=9;
+    auto previewValue=value;previewValue.values[4]=-4.f;
+    *reinterpret_cast<int*>(FixtureAddress(0x925e90))=3;
+    Check(Edit(9,&previewValue,0)==1&&Resolve(ride.data(),0,2,0)==-4.f,
+        "Frontend previews show immediately without changing committed stance");
+    int saveBuffer=0;
+    BeginOwnedSave(nullptr,&saveBuffer,1);EndOwnedSave(nullptr,&saveBuffer,1);
+    Check(SaveCaptured&&Saving.at(key).values[4]==-2.5f,"Native save snapshots exclude unconfirmed preview values");
+    *reinterpret_cast<int*>(FixtureAddress(0x925e90))=6;
+    Check(!Preview.empty()&&Resolve(ride.data(),0,2,0)==-2.5f,
+        "First race update ignores a lingering menu preview before render clears its context");
+    Check(Edit(9,nullptr,2)==1&&Resolve(ride.data(),0,2,0)==-2.5f,"Discard restores committed stance after transition");
     auto ai=ride;Check(Resolve(ai.data(),0,2,0)==0,"Unknown identical AI remains native");
     Check(TrackRideCopy(ride.data(),ai.data())&&Resolve(ai.data(),0,2,0)==-2.5f,
         "observed menu/loader RideInfo copy inherits stance before opening customization");
