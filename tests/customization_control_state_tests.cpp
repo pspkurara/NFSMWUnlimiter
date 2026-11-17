@@ -1,12 +1,28 @@
 #include "../CustomizationControlState.h"
 #include "../CustomizationOrbitMath.h"
 #include "../CustomizationMouseOrbit.h"
+#include "../CustomizationGarageInput.h"
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 using namespace CustomizationControls;
 void require(bool b,const char* text){if(!b)throw std::runtime_error(text);}
 int main(){try{
+    {
+    uint32_t garage[0x90/4]{};uint8_t showcase=1;bool suppressed=false;
+    auto& rotate=*(reinterpret_cast<uint8_t*>(garage)+0x78);
+    rotate=1;garage[0x7C/4]=12;garage[0x80/4]=34;
+    CustomizationGarageInput::Drain(garage,showcase,true,suppressed,[&]{
+        require(suppressed&&rotate&&showcase,"native mapped zoom retains its original camera permission");
+        garage[0x7C/4]=56;garage[0x80/4]=78;garage[0x84/4]=90;
+    });
+    require(!suppressed&&rotate&&showcase&&garage[0x7C/4]==12&&garage[0x80/4]==34&&garage[0x84/4]==90,
+        "mapped zoom survives while native stick rotation fields and permissions are restored");
+    CustomizationGarageInput::Drain(garage,showcase,false,suppressed,[&]{
+        require(suppressed&&!rotate&&!showcase,"focus gap suppresses native manual camera input");
+    });
+    require(rotate&&showcase&&!suppressed,"focus gating does not persistently change native permissions");
+    }
     Session session;
     require(Valid(session.active),"valid defaults");
     require(session.active.resetButtons==0,"defaults must not shadow native R3 camera-view action");

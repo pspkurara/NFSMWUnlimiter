@@ -1,4 +1,5 @@
 #pragma once
+#include "CustomizationGarageInput.h"
 
 #include <windows.h>
 #include <Xinput.h>
@@ -249,6 +250,26 @@ namespace CustomizationCamera
         GarageControlled=true;ControlledGarageMover=GarageMover(garage);
     }
 
+    static thread_local bool SuppressNativeGarageRotation=false;
+    static bool NativeGarageRotationVerified=false;
+    template<uintptr_t Target> static void __fastcall NativeGarageRotate(void* mover,void*,float speed) {
+        if(!SuppressNativeGarageRotation)
+            reinterpret_cast<void(__thiscall*)(void*,float)>(Target)(mover,speed);
+    }
+    static bool InstallNativeGarageRotation() {
+        const uintptr_t sites[]={0x7A241E,0x7A2428,0x7A2455,0x7A2480,0x7A24A4,0x7A24D0};
+        const uintptr_t targets[]={0x476E70,0x476F30,0x476E70,0x476E70,0x476F30,0x476F30};
+        for(unsigned i=0;i<6;++i) {
+            const auto code=reinterpret_cast<const BYTE*>(sites[i]);int32_t displacement=0;
+            std::memcpy(&displacement,code+1,sizeof(displacement));
+            if(code[0]!=0xE8||sites[i]+5+displacement!=targets[i])return false;
+        }
+        for(unsigned i=0;i<6;++i) {
+            if(targets[i]==0x476E70)injector::MakeCALL(sites[i],&NativeGarageRotate<0x476E70>,true);
+            else injector::MakeCALL(sites[i],&NativeGarageRotate<0x476F30>,true);
+        }
+        return true;
+    }
     static void __fastcall GarageJoyEvents(DWORD* garage, void*)
     {
         if(auto observer=GarageUpdateObserver.load())observer();
@@ -262,7 +283,7 @@ namespace CustomizationCamera
         const bool nativeMouse=inputReady&&NativeMouseVerified&&nativePermission&&*reinterpret_cast<const BYTE*>(0x987F70);
         const bool screenAllows=PartsScreen?PartsScreen[0x148/4]!=0x307:
             !Config.partsOnly&&(*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134));
-        const bool eligible=Config.garage&&screenAllows&&GarageMover(garage);
+        const bool eligible=Config.garage&&NativeGarageRotationVerified&&screenAllows&&GarageMover(garage);
         if (!eligible)
         {
             if(!nativeMouse)StopGarageSpeeds(garage);
@@ -271,15 +292,11 @@ namespace CustomizationCamera
             return;
         }
 
-        // Let the original drain its event queues, with its competing camera
-        // branch disabled only for this synchronous call. Menu input is untouched.
-        BYTE& userRotate = *(reinterpret_cast<BYTE*>(garage) + 0x78);
-        BYTE& showcase = *reinterpret_cast<BYTE*>(0x926134);
-        BYTE savedRotate = userRotate, savedShowcase = showcase;
-        userRotate = showcase = 0;
-        reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);
-        userRotate = savedRotate;
-        showcase = savedShowcase;
+        // Disabling the entire branch also discarded mapped trigger zoom.
+        // Preserve native permissions and zoom, suppressing only six verified
+        // yaw/pitch setter calls while this synchronous event drain is active.
+        CustomizationGarageInput::Drain(garage,*reinterpret_cast<BYTE*>(0x926134),inputReady,
+            SuppressNativeGarageRotation,[&]{reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);});
         if(!inputReady) {
             // Native mouse handling precedes this call. Drop residual manual
             // velocity during focus loss and the first returning frame, even
@@ -594,6 +611,10 @@ namespace CustomizationCamera
         const unsigned char joyBranch[] = {0x8A, 0x46, 0x78, 0x84, 0xC0, 0x75, 0x0D, 0xA0, 0x34, 0x61, 0x92, 0};
         const unsigned char rotateFunction[] = {0x8B, 0x81, 0x80, 0, 0, 0, 0x33, 0xD2};
         // Also supplies native-menu updates when both optional garage features are off.
+        if(Config.garage) {
+            NativeGarageRotationVerified=InstallNativeGarageRotation();
+            if(!NativeGarageRotationVerified)Report("Native garage rotation call sites differ; retaining native garage camera input.");
+        }
         if (Matches(0x7B9F23, joyCall) && Matches(0x7A2380, joyBranch) &&
             Matches(0x476E70, rotateFunction) && Matches(0x476F30, rotateFunction))
             injector::MakeCALL(0x7B9F23, GarageJoyEvents, true);

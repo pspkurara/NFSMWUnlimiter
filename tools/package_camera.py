@@ -10,7 +10,7 @@ from package_customization import cmake_path, git_text, run
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [
     '.gitignore', 'standalone', 'CustomizationCamera.h', 'CustomizationControls.h',
-    'CustomizationControlState.h', 'CustomizationOrbitMath.h',
+    'CustomizationControlState.h', 'CustomizationOrbitMath.h', 'CustomizationGarageInput.h',
     'CustomizationMouseOrbit.h', 'CustomizationProfileHost.h',
     'CustomizationProfileStorage.h', 'CustomizationRuntimePeer.h',
     'NFSMWCustomizationCamera.ini', 'CustomizationCamera.md', 'CustomizationControls.md',
