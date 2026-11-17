@@ -18,7 +18,8 @@ foreach ($path in @($scripts,$target)) {
     if ((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Redirected installation target.' }
 }
 $oldHash=(Get-FileHash -LiteralPath $target).Hash
-if ($oldHash -ne '24608d38dd6e546d40d72db55c4bc30c441ab4ffe4546baeb7ae29ee58c930de') { throw 'Installed ASI differs from the recorded baseline.' }
+if ($oldHash -notin @('24608d38dd6e546d40d72db55c4bc30c441ab4ffe4546baeb7ae29ee58c930de',
+    '24463a2bf4580f7dfa3f99b35307480c06f8a21a9d910e61a66db6988abbb919')) { throw 'Installed ASI differs from the recorded baseline.' }
 if ((Get-FileHash -LiteralPath $source).Hash -ne $manifest.sha256) { throw 'Payload hash mismatch.' }
 if (@(Get-CimInstance Win32_Process -Filter "Name='speed.exe'").Count) { throw 'Normally exit all game instances before installing.' }
 if (!$PSCmdlet.ShouldProcess($target,'Install camera-only update with rollback backup')) { return }
