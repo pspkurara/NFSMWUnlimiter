@@ -8,6 +8,15 @@ Do not treat successful builds or unit tests as in-game compatibility evidence.
 
 ## Entry and assets
 
+With `[StanceMenu] OrbitCamera=1` (default), the editor reuses the installed
+Showcase camera metadata through the native screen-info lookup. It keeps the
+same editor package, car instance and preview, allowing native mouse camera
+input and the configured garage camera stick without a separate Showcase screen.
+Garage remapping must be enabled with `[Garage] Enabled=1, PartsOnly=0`; the
+existing deadzone/inversion settings remain in charge. Other packages retain
+their original metadata. An unknown/occupied camera hook disables this optional
+view only. Actual orbit/mouse behavior still requires live validation.
+
 One `Stance adjustment` entry is added under the existing body/parts shop for
 owned career/My Cars records. No top-level shop or part-database asset is added.
 `CustomizationStanceAssets.h` reads the installed game's InGameB bundle (raw or

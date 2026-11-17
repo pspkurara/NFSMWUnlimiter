@@ -80,6 +80,30 @@ static FactoryFn OriginalFactory=nullptr;
 static DrawFn OriginalDraw=nullptr;
 static ActFn OriginalAct=nullptr;
 static ReactFn OriginalReact=nullptr;
+using ScreenInfoFn=unsigned(__cdecl*)(const char*,int);
+static ScreenInfoFn OriginalScreenInfo=nullptr;
+static unsigned __cdecl ScreenInfo(const char* package,int category) {
+    // Reuse installed Showcase camera metadata without switching packages or
+    // rebuilding the car. The editor lease and its unpurchased preview stay live.
+    if(Screen&&package&&_stricmp(package,Package)==0)return OriginalScreenInfo("Showcase.fng",-1);
+    return OriginalScreenInfo(package,category);
+}
+static void InstallGarageView() {
+    CustomizationCamera::Settings settings;
+    if(!settings.ReadInteger("StanceMenu","OrbitCamera",1)||!settings.ReadInteger("Garage","Enabled",1)||
+       settings.ReadInteger("Garage","PartsOnly",0))return;
+    constexpr uintptr_t address=0x7A8C70;
+    const BYTE entry[]={0x55,0x8B,0xEC,0x83,0xE4,0xF8,0x6A,0xFF,0x68,0xA6,0x29,0x88,0};
+    if(std::memcmp(reinterpret_cast<const void*>(address),entry,sizeof(entry))||
+       MH_CreateHook(reinterpret_cast<void*>(address),&ScreenInfo,reinterpret_cast<void**>(&OriginalScreenInfo))!=MH_OK) {
+        CustomizationSave::Log("Stance orbit view unavailable: native camera metadata hook is owned or unknown.");return;
+    }
+    if(MH_EnableHook(reinterpret_cast<void*>(address))!=MH_OK) {
+        MH_RemoveHook(reinterpret_cast<void*>(address));OriginalScreenInfo=nullptr;
+        CustomizationSave::Log("Stance orbit view unavailable: camera metadata hook could not be enabled.");return;
+    }
+    CustomizationSave::Log("Stance editor uses the installed Showcase camera view without leaving its preview.");
+}
 
 static const char* Labels[]={"Height","Track","Camber","Width","Radius","Brake"};
 static float NormalStep=5,FineStep=1,FastStep=20;
@@ -474,6 +498,7 @@ static bool Install() {
         CustomizationSave::Log("Native stance menu disabled: garage update owner unavailable.");return false;
     }
     Installed=true;
+    InstallGarageView();
     CustomizationSave::Log("Native body-shop stance menu installed (free grouped adjustment).");return true;
 }
 }
