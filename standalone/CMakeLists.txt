@@ -24,7 +24,7 @@ foreach(fixture IN ITEMS customization_control_state customization_controls_save
 endforeach()
 
 # Test coinstallation with two separately loaded copies of the shared source.
-foreach(kind IN ITEMS unlimiter camera)
+foreach(kind IN ITEMS unlimiter camera stance)
   add_library(camera_runtime_fixture_${kind} SHARED "${CAMERA_ROOT}/tests/camera_runtime_fixture.cpp")
   target_include_directories(camera_runtime_fixture_${kind} PRIVATE "${CAMERA_ROOT}/includes")
   target_compile_definitions(camera_runtime_fixture_${kind} PRIVATE MWCL_CAMERA_RUNTIME_FIXTURE NOMINMAX _CRT_SECURE_NO_WARNINGS)
@@ -37,9 +37,14 @@ foreach(kind IN ITEMS unlimiter camera)
 endforeach()
 set_target_properties(camera_runtime_fixture_unlimiter PROPERTIES OUTPUT_NAME NFSMWUnlimiter)
 set_target_properties(camera_runtime_fixture_camera PROPERTIES OUTPUT_NAME NFSMWExtendedCamera)
+set_target_properties(camera_runtime_fixture_stance PROPERTIES OUTPUT_NAME NFSMWStanceHost)
 add_executable(camera_runtime_peer_tests "${CAMERA_ROOT}/tests/camera_runtime_peer_tests.cpp")
 target_compile_options(camera_runtime_peer_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME camera_runtime_unlimiter_first COMMAND camera_runtime_peer_tests
   $<TARGET_FILE:camera_runtime_fixture_unlimiter> $<TARGET_FILE:camera_runtime_fixture_camera>)
 add_test(NAME camera_runtime_camera_first COMMAND camera_runtime_peer_tests
   $<TARGET_FILE:camera_runtime_fixture_camera> $<TARGET_FILE:camera_runtime_fixture_unlimiter>)
+add_test(NAME camera_runtime_stance_first COMMAND camera_runtime_peer_tests
+  $<TARGET_FILE:camera_runtime_fixture_stance> $<TARGET_FILE:camera_runtime_fixture_camera>)
+add_test(NAME camera_runtime_camera_before_stance COMMAND camera_runtime_peer_tests
+  $<TARGET_FILE:camera_runtime_fixture_camera> $<TARGET_FILE:camera_runtime_fixture_stance>)

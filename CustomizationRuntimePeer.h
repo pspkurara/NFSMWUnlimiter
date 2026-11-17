@@ -27,7 +27,7 @@ static bool Pin(const void* code) {
         reinterpret_cast<LPCSTR>(code),&module)!=FALSE;
 }
 template<class Api,class Validate> static const Api* Find(const char* symbol,Validate valid) {
-    for(const char* name:{"NFSMWUnlimiter.asi","NFSMWExtendedCamera.asi"}) {
+    for(const char* name:{"NFSMWUnlimiter.asi","NFSMWExtendedCamera.asi","NFSMWStanceHost.asi"}) {
         auto module=GetModuleHandleA(name);if(!module)continue;
         auto getter=reinterpret_cast<const Api*(__cdecl*)()>(GetProcAddress(module,symbol));
         if(!getter) {
