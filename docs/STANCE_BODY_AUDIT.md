@@ -61,3 +61,9 @@ still require valid axle data; the bridge does not invent a vehicle wheelbase.
 Fixtures cover both lowering and raising with zero/nonfinite axle positions and
 reject nonfinite heights. This fixes that identifiable dependency defect; it is
 not proof that the Fiat's native attributes are invalid or its symptom is fixed.
+
+The subsequent geometry investigation found reflection pivots in the original
+Fiat asset metadata, but the native simple-animation caller uses that matrix only
+for two scenery hashes, neither matching Fiat. Live hash-table reads confirmed
+the default targets. See [pivot-use evidence](STANCE_GEOMETRY_RESEARCH.md#pc-pivot-use-follow-up).
+An unconditional vehicle axis correction is therefore unsupported by this lead.

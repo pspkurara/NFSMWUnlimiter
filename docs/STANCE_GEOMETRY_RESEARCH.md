@@ -52,6 +52,26 @@ submitted transform still require runtime evidence. In particular this finding
 does not prove the cause of the user's inverted Fiat image or explain why its
 main body did not lower. Do not add an unconditional Fiat axis flip as a fix.
 
+## PC pivot-use follow-up
+
+The inspected native eModel::GetPivotMatrix at 4FB7D0 reads model+0xC, then
+returns solid+0x40. Its direct PC caller is SimpleModelAnim::Animate, 73D3C0;
+eView::Render calls that routine at 6DAA2B with the submitted local/world matrix.
+The animation routine compares solid+0x10 against exactly two configured hashes
+before obtaining/modifying the pivot and composing it into the matrix.
+
+Read-only process inspection on 2026-11-17 confirmed both live entries at
+904B44/904B58 were their native defaults: 8A9B575D (windmill) and 63555FF2
+(donut sign). Fiat BASE is FC93B979 and standard BODY is B5385233; neither
+matches. Thus the inspected native simple-animation path does not apply the
+stored Fiat reflection pivot. This narrows that hypothesis; it does not prove
+that every graphics mod or all other renderer paths ignore pivot metadata.
+
+The offline report keeps positions in their stored coordinate frame and reports
+pivot metadata separately. It must not silently pre-multiply all car vertices by
+the stored pivot. Runtime mesh/transform capture is still needed before matching
+an automatic arch contour against the rendered fender.
+
 The format facts were cross-checked against the primary
 [NFS-ModTools MostWantedSolidReader](https://github.com/NFSTools/NFS-ModTools/blob/master/Common/Geometry/MostWantedSolidReader.cs):
 104-byte shading groups, effect transitions delimiting vertex streams, 128-byte
