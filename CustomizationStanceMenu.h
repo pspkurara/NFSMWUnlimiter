@@ -29,6 +29,8 @@ static uint64_t Owner=0;
 static std::string Parent;
 static Session EditSession;
 static std::array<DWORD*,7> Sliders{};
+static bool RefreshPending=false;
+static void Refresh();
 struct SavedText {DWORD* object;unsigned name,language,flags;std::wstring text;};
 static std::vector<SavedText> SavedStrings;
 static void Remember(DWORD* object) {
@@ -142,6 +144,12 @@ static void Tick() {
         Cancel();Opening=false;CustomizationSave::Log("Stance menu open timed out; lease released.");
     }
     if(Screen&&!Closing&&!Current()){Cancel();Leave();}
+    // Setup runs inside the native constructor, before the package's initial
+    // scripts and widget positioning finish. Draw saved values again after
+    // that lifecycle boundary; asset defaults must not become the visible state.
+    if(RefreshPending&&Screen&&!Closing&&!Constructing) {
+        RefreshPending=false;Refresh();
+    }
 }
 static int SliderIndex(DWORD* slider) {
     for(int i=0;i<7;++i)if(Sliders[i]==slider)return i;
@@ -154,9 +162,15 @@ static void Heading(const char* error=nullptr) {
     const char* modes[]={"BOTH","FRONT","REAR"};
     char caption[160]{};
     const int channel=Screen?SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4])):-1;
-    if(channel>=0&&channel<6)
-        sprintf_s(caption,"STANCE: %s | %s [%.4g .. %.4g] %s",modes[EditSession.axle],Labels[channel],
-            double(EditSession.info.minimum[channel]),double(EditSession.info.maximum[channel]),channel==2?"deg":"m");
+    if(channel>=0&&channel<6) {
+        const unsigned axle=EditSession.axle==2?1:0;
+        char current[48]{};
+        if(!EditSession.axle&&EditSession.Value(channel,0)!=EditSession.Value(channel,1))
+            sprintf_s(current,"%.4g/%.4g",double(EditSession.Value(channel,0)),double(EditSession.Value(channel,1)));
+        else sprintf_s(current,"%.4g",double(EditSession.Value(channel,axle)));
+        sprintf_s(caption,"STANCE: %s | %s %s %s [%.4g .. %.4g]",modes[EditSession.axle],Labels[channel],current,
+            channel==2?"deg":"m",double(EditSession.info.minimum[channel]),double(EditSession.info.maximum[channel]));
+    }
     else sprintf_s(caption,"STANCE: %s | LT/RT AXLE | RB FINE | LB FAST",modes[EditSession.axle]);
     // These objects belong to our independent package clone. The race tuning
     // package and its labels remain untouched and every edit is restored on exit.
@@ -276,6 +290,7 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     case Left: case Right:
     case 0x9803F6E2: // native mouse navigation
         reinterpret_cast<NotifyFn>(0x5A96C0)(screen,message,object,p1,p2);
+        if(message==0x35F8620B)RefreshPending=true;
         Heading();
         break;
     default: break;
@@ -305,6 +320,7 @@ static void __fastcall Setup(DWORD* screen,void*) {
         Sliders[i]=slider;
     }
     Refresh();reinterpret_cast<void(__thiscall*)(DWORD*,int)>(0x5A5EA0)(screen,1);
+    RefreshPending=true;
     Heading();CustomizationSave::Log("Stance screen sliders ready.");
 }
 static DWORD* __cdecl Factory(DWORD* data) {
@@ -317,7 +333,7 @@ static DWORD* __cdecl Factory(DWORD* data) {
 }
 static void __fastcall Destructor(DWORD* screen,void*) {
     if(screen==Screen) {
-        if(!Finished)Cancel();RestoreText();Screen=nullptr;Sliders.fill(nullptr);Owner=0;Opening=false;Closing=false;
+        if(!Finished)Cancel();RestoreText();Screen=nullptr;Sliders.fill(nullptr);Owner=0;Opening=false;Closing=false;RefreshPending=false;
     }
     OriginalDestructor(screen);
 }
