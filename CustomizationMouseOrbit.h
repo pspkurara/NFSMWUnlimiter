@@ -27,8 +27,8 @@ struct MouseOrbit {
         if(rotate||sample.wheel) {
             owns=true;
             if(rotate) {
-                yaw=std::remainder(yaw+sample.dx*settings.mouseSensitivity*(settings.invertX?-1.f:1.f),360.f);
-                pitch=std::clamp(pitch-sample.dy*settings.mouseSensitivity*(settings.invertY?-1.f:1.f),
+                yaw=std::remainder(yaw+sample.dx*settings.mouseSensitivity*(settings.mouseInvertX?-1.f:1.f),360.f);
+                pitch=std::clamp(pitch-sample.dy*settings.mouseSensitivity*(settings.mouseInvertY?-1.f:1.f),
                     -settings.pitchLimit,settings.pitchLimit);
             }
             const float notches=std::clamp(sample.wheel/120.f,-20.f,20.f);

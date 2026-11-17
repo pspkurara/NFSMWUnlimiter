@@ -44,9 +44,11 @@ struct Backup {std::string profile;State state;uint32_t inputCrc;};
 static std::map<void*,Backup> Backups;
 static std::atomic<HWND> Dialog{nullptr};
 static std::atomic<bool> MirrorAvailable{false};
+static std::atomic<bool> RadarAvailable{false};
 static HWND Message=nullptr;
 static HWND EnabledBox=nullptr,InvertXBox=nullptr,InvertYBox=nullptr,YawBox=nullptr,PitchBox=nullptr;
-static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=nullptr,MouseSpeedBox=nullptr,MouseZoomBox=nullptr,HeadingBox=nullptr,MirrorBox=nullptr;
+static std::array<HWND,2> DirectionInvert{},MouseInvert{};
+static HWND ControllerBox=nullptr,ResetBox=nullptr,ModeBox=nullptr,MouseBox=nullptr,MouseSpeedBox=nullptr,MouseZoomBox=nullptr,HeadingBox=nullptr,MirrorBox=nullptr,RadarBox=nullptr;
 static std::array<HWND,5> Keys{},Tuning{};
 static DWORD(WINAPI* PadState)(DWORD,XINPUT_STATE*)=nullptr;
 
@@ -54,8 +56,9 @@ static State Runtime() {
     if(Peer) {State result{};if(Peer->snapshot(&result))return result;return State{};}
     std::lock_guard<std::mutex> lock(ControlMutex);return ControlSession.active;
 }
-static void SetMirrorAvailable(bool available) {
-    if(Peer)Peer->mirrorAvailable(available?1u:0u);else MirrorAvailable=available;
+static void SetMirrorAvailable(bool available,bool radar=false) {
+    const uint32_t capabilities=(available?1u:0u)|(radar?2u:0u);
+    if(Peer)Peer->mirrorAvailable(capabilities);else {MirrorAvailable=available;RadarAvailable=radar;}
 }
 static bool Foreground() {DWORD pid=0;GetWindowThreadProcessId(GetForegroundWindow(),&pid);return pid==GetCurrentProcessId();}
 static float Axis(const XINPUT_GAMEPAD& p,unsigned axis) {
@@ -82,7 +85,7 @@ static bool ReadOrbit(const State& s,float& x,float& y,bool& reset) {
     auto down=[&](unsigned key){return key&&(GetAsyncKeyState(int(key))&0x8000)!=0;};
     x=std::clamp(x+float(down(s.keys[1]))-float(down(s.keys[0])),-1.f,1.f);
     y=std::clamp(y+float(down(s.keys[2]))-float(down(s.keys[3])),-1.f,1.f);
-    reset=reset||down(s.keys[4]);if(s.invertX)x=-x;if(s.invertY)y=-y;
+    reset=reset||down(s.keys[4]);InvertStick(s,x,y);
     return true;
 }
 static bool ReadOrbit(float& x,float& y,bool& reset) {return ReadOrbit(Runtime(),x,y,reset);}
@@ -94,7 +97,7 @@ static uint32_t __cdecl ReadRuntimeOrbit(const State* state,float* x,float* y,ui
     State valid;if(!DecodeState(state,sizeof(*state),valid))return 0;
     bool centered=false;const bool result=ReadOrbit(valid,*x,*y,centered);*reset=centered?1u:0u;return result?1u:0u;
 }
-static void __cdecl RuntimeMirror(uint32_t value) {MirrorAvailable=value!=0;}
+static void __cdecl RuntimeMirror(uint32_t value) {MirrorAvailable=(value&1)!=0;RadarAvailable=(value&2)!=0;}
 static const RuntimeApi LocalRuntime={sizeof(RuntimeApi),1,sizeof(State),&SnapshotRuntime,&ReadRuntimeOrbit,&RuntimeMirror};
 static bool PublishRuntime() {
     if(!CustomizationRuntimePeer::Pin(reinterpret_cast<const void*>(&SnapshotRuntime)))return false;
@@ -115,7 +118,7 @@ static State LoadState(const std::string& name) {
         FileHeader header{};State candidate{},decoded{};
         stream.read(reinterpret_cast<char*>(&header),sizeof(header));
         if(!stream||std::memcmp(header.magic,"MWCLIN1",8)||header.version!=1||header.reserved||
-            (header.size!=sizeof(State)&&header.size!=Version3StateBytes&&header.size!=Version2StateBytes&&header.size!=LegacyStateBytes))return state;
+            (header.size!=sizeof(State)&&header.size!=Version4StateBytes&&header.size!=Version3StateBytes&&header.size!=Version2StateBytes&&header.size!=LegacyStateBytes))return state;
         stream.read(reinterpret_cast<char*>(&candidate),header.size);
         std::array<uint8_t,32> digest{};
         if(stream&&stream.peek()==EOF&&header.crc==CustomizationProfileStorage::Crc(&candidate,header.size)&&
@@ -208,12 +211,17 @@ static HWND Child(const wchar_t* type,const std::wstring& text,DWORD style,int x
 static void Populate(const State& s){
     SendMessageW(HeadingBox,BM_SETCHECK,s.vehicleHeading?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(MirrorBox,BM_SETCHECK,s.hideMirror?BST_CHECKED:BST_UNCHECKED,0);
+    SendMessageW(RadarBox,BM_SETCHECK,s.showRadarOnMirrorHide?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(MouseBox,BM_SETCHECK,s.mouseEnabled?BST_CHECKED:BST_UNCHECKED,0);
     SetWindowTextW(MouseSpeedBox,Number(s.mouseSensitivity).c_str());SetWindowTextW(MouseZoomBox,Number(s.mouseZoomStep).c_str());
     SendMessageW(ModeBox,CB_SETCURSEL,s.orbitMode,0);
     SendMessageW(EnabledBox,BM_SETCHECK,s.enabled?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(InvertXBox,BM_SETCHECK,s.invertX?BST_CHECKED:BST_UNCHECKED,0);
     SendMessageW(InvertYBox,BM_SETCHECK,s.invertY?BST_CHECKED:BST_UNCHECKED,0);
+    SendMessageW(DirectionInvert[0],BM_SETCHECK,s.directionInvertX?BST_CHECKED:BST_UNCHECKED,0);
+    SendMessageW(DirectionInvert[1],BM_SETCHECK,s.directionInvertY?BST_CHECKED:BST_UNCHECKED,0);
+    SendMessageW(MouseInvert[0],BM_SETCHECK,s.mouseInvertX?BST_CHECKED:BST_UNCHECKED,0);
+    SendMessageW(MouseInvert[1],BM_SETCHECK,s.mouseInvertY?BST_CHECKED:BST_UNCHECKED,0);
     SetWindowTextW(ControllerBox,std::to_wstring(s.controller).c_str());SetWindowTextW(ResetBox,std::to_wstring(s.resetButtons).c_str());
     SendMessageW(YawBox,CB_SETCURSEL,s.yawAxis,0);SendMessageW(PitchBox,CB_SETCURSEL,s.pitchAxis,0);
     for(int i=0;i<5;++i)SetWindowTextW(Keys[i],std::to_wstring(s.keys[i]).c_str());
@@ -231,6 +239,10 @@ static bool Integer(HWND box,uint32_t& out,bool key=false){
 static bool ApplyDialog(bool saveNow=false){
     State next;next.orbitMode=uint32_t(SendMessageW(ModeBox,CB_GETCURSEL,0,0));next.enabled=SendMessageW(EnabledBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.invertX=SendMessageW(InvertXBox,BM_GETCHECK,0,0)==BST_CHECKED;next.invertY=SendMessageW(InvertYBox,BM_GETCHECK,0,0)==BST_CHECKED;
+    next.directionInvertX=SendMessageW(DirectionInvert[0],BM_GETCHECK,0,0)==BST_CHECKED;
+    next.directionInvertY=SendMessageW(DirectionInvert[1],BM_GETCHECK,0,0)==BST_CHECKED;
+    next.mouseInvertX=SendMessageW(MouseInvert[0],BM_GETCHECK,0,0)==BST_CHECKED;
+    next.mouseInvertY=SendMessageW(MouseInvert[1],BM_GETCHECK,0,0)==BST_CHECKED;
     next.yawAxis=uint32_t(SendMessageW(YawBox,CB_GETCURSEL,0,0));next.pitchAxis=uint32_t(SendMessageW(PitchBox,CB_GETCURSEL,0,0));
     if(!Integer(ControllerBox,next.controller)||!Integer(ResetBox,next.resetButtons))return false;
     for(int i=0;i<5;++i)if(!Integer(Keys[i],next.keys[i],true))return false;
@@ -238,6 +250,7 @@ static bool ApplyDialog(bool saveNow=false){
     for(int i=0;i<5;++i){auto text=Text(Tuning[i]);wchar_t* end=nullptr;*numbers[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
     next.vehicleHeading=SendMessageW(HeadingBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.hideMirror=SendMessageW(MirrorBox,BM_GETCHECK,0,0)==BST_CHECKED;
+    next.showRadarOnMirrorHide=SendMessageW(RadarBox,BM_GETCHECK,0,0)==BST_CHECKED;
     next.mouseEnabled=SendMessageW(MouseBox,BM_GETCHECK,0,0)==BST_CHECKED;
     HWND mouseBoxes[]={MouseSpeedBox,MouseZoomBox};float* mouseValues[]={&next.mouseSensitivity,&next.mouseZoomStep};
     for(int i=0;i<2;++i){auto text=Text(mouseBoxes[i]);wchar_t* end=nullptr;*mouseValues[i]=wcstof(text.c_str(),&end);if(end==text.c_str()||*end)return false;}
@@ -271,7 +284,7 @@ static void OpenDialog(){
     {std::lock_guard<std::mutex> lock(ControlMutex);if(!Screen&&!AllowLiveEditing)return;
         DialogProfile=CurrentName();if(!CustomizationProfileStorage::ValidName(DialogProfile))return;
         DialogLive=!Screen;snapshot=ControlSession.active;DialogGeneration=ScreenGeneration;}
-    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,690,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    Dialog=CreateWindowExW(WS_EX_TOOLWINDOW,L"MWCL_CONTROLS",L"Driving camera settings",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,820,740,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     EnabledBox=Child(L"BUTTON",L"Enable race 360 degree camera",BS_AUTOCHECKBOX,16,16,400,25);
     Child(L"STATIC",DialogLive?L"Apply changes now, or use Save and apply to keep them with this profile.":L"Return to the game and confirm your control changes after Apply.",0,16,48,770,25);
     Child(L"STATIC",L"Controller index (0..3)",0,16,85,180,24);ControllerBox=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,210,82,100,25);
@@ -280,11 +293,15 @@ static void OpenDialog(){
     Child(L"STATIC",L"Orbit vertical axis",0,16,161,180,24);PitchBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,210,158,180,180);
     for(auto axis:axes){SendMessageW(YawBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(axis));SendMessageW(PitchBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(axis));}
     Child(L"STATIC",L"Reset pad button mask",0,16,199,180,24);ResetBox=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,210,196,180,25);
-    InvertXBox=Child(L"BUTTON",L"Invert horizontal",BS_AUTOCHECKBOX,16,234,185,25);InvertYBox=Child(L"BUTTON",L"Invert vertical",BS_AUTOCHECKBOX,210,234,180,25);
+    InvertXBox=Child(L"BUTTON",L"Rate: invert horizontal",BS_AUTOCHECKBOX,16,234,190,25);InvertYBox=Child(L"BUTTON",L"Rate: invert vertical",BS_AUTOCHECKBOX,210,234,185,25);
+    DirectionInvert[0]=Child(L"BUTTON",L"Direction: invert horizontal",BS_AUTOCHECKBOX,16,267,190,25);
+    DirectionInvert[1]=Child(L"BUTTON",L"Direction: invert vertical",BS_AUTOCHECKBOX,210,267,185,25);
+    MouseInvert[0]=Child(L"BUTTON",L"Mouse: invert horizontal",BS_AUTOCHECKBOX,16,300,190,25);
+    MouseInvert[1]=Child(L"BUTTON",L"Mouse: invert vertical",BS_AUTOCHECKBOX,210,300,185,25);
     const wchar_t* keyNames[]={L"Keyboard orbit left",L"Keyboard orbit right",L"Keyboard orbit up",L"Keyboard orbit down",L"Keyboard orbit reset"};
     const wchar_t* tuningNames[]={L"Deadzone (0..0.95)",L"Degrees/sec (1..720)",L"Pitch limit (0..80)",L"Return delay (-1..60)",L"Return speed (1..720)"};
     for(int i=0;i<5;++i){int y=85+i*38;Child(L"STATIC",keyNames[i],0,420,y,200,24);Keys[i]=Child(L"EDIT",L"0",WS_BORDER|WS_TABSTOP,640,y-3,140,25);
-        int ty=285+i*33;Child(L"STATIC",tuningNames[i],0,16,ty,220,24);Tuning[i]=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,250,ty-3,140,25);}
+        int ty=345+i*33;Child(L"STATIC",tuningNames[i],0,16,ty,220,24);Tuning[i]=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,250,ty-3,140,25);}
     MouseBox=Child(L"BUTTON",L"Enable mouse drag and wheel zoom",BS_AUTOCHECKBOX,420,280,360,25);
     Child(L"STATIC",L"Mouse sensitivity (0.01..10)",0,420,315,230,25);MouseSpeedBox=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,660,312,120,25);
     Child(L"STATIC",L"Zoom step (0.01..1)",0,420,350,230,25);MouseZoomBox=Child(L"EDIT",L"",WS_BORDER|WS_TABSTOP,660,347,120,25);
@@ -292,12 +309,14 @@ static void OpenDialog(){
     ModeBox=Child(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,540,402,240,130);
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Rate orbit (UG2 style)"));
     SendMessageW(ModeBox,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(L"Direction: release to center"));
-    HeadingBox=Child(L"BUTTON",L"Keep orbit relative to vehicle heading",BS_AUTOCHECKBOX,16,458,375,25);
-    MirrorBox=Child(L"BUTTON",L"Hide mirror while camera is rotated",BS_AUTOCHECKBOX,420,458,375,25);
+    HeadingBox=Child(L"BUTTON",L"Keep orbit relative to vehicle heading",BS_AUTOCHECKBOX,16,530,375,25);
+    MirrorBox=Child(L"BUTTON",L"Hide mirror while camera is rotated",BS_AUTOCHECKBOX,420,530,375,25);
     EnableWindow(MirrorBox,MirrorAvailable.load());
-    Message=Child(L"STATIC",L"Direction mode uses both axes for horizontal direction; native look-back can run alongside it.",0,16,500,770,40);
-    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,595,230,30,4);
-    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,595,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,595,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,595,120,30,3);
+    RadarBox=Child(L"BUTTON",L"Show radar during camera mirror auto-hide",BS_AUTOCHECKBOX,420,563,375,25);
+    EnableWindow(RadarBox,RadarAvailable.load());
+    Message=Child(L"STATIC",L"Rate, direction and mouse have independent inversion. Direction uses both axes for horizontal direction.",0,16,595,770,40);
+    if(DialogLive)Child(L"BUTTON",L"Save and apply",WS_TABSTOP,16,650,230,30,4);
+    Child(L"BUTTON",L"Apply",WS_TABSTOP,330,650,180,30,1);Child(L"BUTTON",L"Cancel",WS_TABSTOP,520,650,120,30,2);Child(L"BUTTON",L"Defaults",WS_TABSTOP,650,650,120,30,3);
     Populate(snapshot);ShowWindow(Dialog,SW_SHOW);SetForegroundWindow(Dialog);
 }
 static DWORD WINAPI RunUI(void*){

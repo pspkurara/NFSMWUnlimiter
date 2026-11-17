@@ -37,6 +37,7 @@ namespace CustomizationCamera
     static DWORD* PartsScreen = nullptr;
     static bool DriverPreviewActive = false;
     static bool GarageControlled = false;
+    static void* ControlledGarageMover=nullptr;
     static bool Installed = false;
     static bool NativeLookBackVerified = false;
     static bool NativeViewVerified = false;
@@ -213,6 +214,8 @@ namespace CustomizationCamera
 
     static void SetGarageSpeeds(DWORD* garage, float x, float y)
     {
+        // Native setters convert automatic modes to manual even for zero speed.
+        if(x==0&&y==0)return;
         void* mover = GarageMover(garage);
         if (!mover) return;
         // PC layout verified in SetV/HRotateSpeed and SelectCarCameraMover::Update.
@@ -224,6 +227,25 @@ namespace CustomizationCamera
         reinterpret_cast<void(__thiscall*)(void*, float)>(0x476F30)(mover, x * Config.garageSpeed);
         garage[0x7C / 4] = 0;
         garage[0x80 / 4] = 0;
+    }
+
+    static void StopGarageSpeeds(DWORD* garage) {
+        auto mover=GarageMover(garage);
+        if(GarageControlled&&mover&&mover==ControlledGarageMover&&
+            *reinterpret_cast<int*>(static_cast<BYTE*>(mover)+0x80)==1) {
+            reinterpret_cast<void(__thiscall*)(void*,float)>(0x476E70)(mover,0);
+            reinterpret_cast<void(__thiscall*)(void*,float)>(0x476F30)(mover,0);
+        }
+        GarageControlled=false;ControlledGarageMover=nullptr;
+    }
+    static void ApplyGarageInput(DWORD* garage,float x,float y,bool nativeMouse) {
+        if(x==0&&y==0) {
+            if(nativeMouse){GarageControlled=false;ControlledGarageMover=nullptr;}
+            else StopGarageSpeeds(garage);
+            return;
+        }
+        SetGarageSpeeds(garage,x,y);
+        GarageControlled=true;ControlledGarageMover=GarageMover(garage);
     }
 
     static void __fastcall GarageJoyEvents(DWORD* garage, void*)
@@ -239,8 +261,8 @@ namespace CustomizationCamera
         bool control = Config.garage && screenAllows && GarageMover(garage) && ReadStick(x, y, reset);
         if (!control)
         {
-            if (GarageControlled && !nativeMouse) SetGarageSpeeds(garage, 0, 0);
-            GarageControlled = false;
+            if(!nativeMouse)StopGarageSpeeds(garage);
+            else {GarageControlled=false;ControlledGarageMover=nullptr;}
             reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);
             return;
         }
@@ -256,9 +278,7 @@ namespace CustomizationCamera
         showcase = savedShowcase;
         // Native mouse handling runs before this joy call and already set speeds.
         // An idle connected pad must not replace those speeds with zero.
-        if(nativeMouse&&x==0&&y==0){GarageControlled=false;return;}
-        SetGarageSpeeds(garage, x, y);
-        GarageControlled = true;
+        ApplyGarageInput(garage,x,y,nativeMouse);
     }
 
     static void __declspec(naked) DriverVisibilityCave()
@@ -289,11 +309,44 @@ namespace CustomizationCamera
     static ViewStamp LastView;
     static CustomizationControls::MouseOrbit Mouse;
     static CustomizationControls::MirrorPose Mirror;
+    static CustomizationOrbit::VehicleOrbit VehicleOrbit;
+    static bool NativeMirrorVisible(int viewId) {
+        return reinterpret_cast<bool(__cdecl*)(int)>(0x595D40)(viewId);
+    }
     static bool __cdecl MirrorVisible(int viewId) {
         const auto controls=CustomizationControls::Runtime();
         if(Mirror.Hide(controls,viewId,*reinterpret_cast<const int*>(0x925E90)==6,
             CustomizationControls::Foreground(),GetTickCount64()))return false;
-        return reinterpret_cast<bool(__cdecl*)(int)>(0x595D40)(viewId);
+        return NativeMirrorVisible(viewId);
+    }
+    static void(__thiscall* OriginalRadarUpdate)(void*,void*)=nullptr;
+    static void __fastcall RadarUpdate(void* radar,void*,void* player) {
+        OriginalRadarUpdate(radar,player); // Detection, sound and LED logic remain native.
+        if(!Mirror.HideRadar(CustomizationControls::Runtime(),NativeMirrorVisible(1),
+            *reinterpret_cast<const int*>(0x925E90)==6,CustomizationControls::Foreground(),GetTickCount64()))return;
+        // Use native scripts, without keeping FE-object pointers or visibility
+        // flags across HUD lifetimes. Native Update restores its own scripts on release.
+        for(unsigned offset:{0x38u,0x4Cu,0x50u}) {
+            void* object=*reinterpret_cast<void**>(static_cast<BYTE*>(radar)+offset);
+            if(!reinterpret_cast<bool(__cdecl*)(void*,uint32_t)>(0x514DA0)(object,0x0016A259))
+                reinterpret_cast<void(__cdecl*)(void*,uint32_t,bool)>(0x514D10)(object,0x0016A259,true);
+        }
+    }
+    static bool InstallRadarHook() {
+        const unsigned char update[]={0x83,0xEC,0x1C,0x56,0x8B,0xF1,0xE8,0xB5,0x93,0x15,0};
+        const unsigned char group[]={0x89,0x46,0x38};
+        const unsigned char backing[]={0x89,0x6E,0x4C};
+        const unsigned char mirrorBacking[]={0x89,0x6E,0x50};
+        const unsigned char script[]={0x57,0x8B,0x7C,0x24,8,0x85,0xFF,0x74,0x2D};
+        const unsigned char isScript[]={0x8B,0x44,0x24,4,0x85,0xC0,0x74,0x13};
+        if(!Matches(0x566170,update)||!Matches(0x59CCE2,group)||
+            !Matches(0x59CD60,backing)||!Matches(0x59CD91,mirrorBacking)||
+            !Matches(0x514D10,script)||!Matches(0x514DA0,isScript))return false;
+        auto status=MH_Initialize();if(status!=MH_OK&&status!=MH_ERROR_ALREADY_INITIALIZED)return false;
+        if(MH_CreateHook(reinterpret_cast<void*>(0x566170),RadarUpdate,
+            reinterpret_cast<void**>(&OriginalRadarUpdate))!=MH_OK)return false;
+        if(MH_EnableHook(reinterpret_cast<void*>(0x566170))==MH_OK)return true;
+        MH_RemoveHook(reinterpret_cast<void*>(0x566170));OriginalRadarUpdate=nullptr;return false;
     }
     static CustomizationControls::MouseSample MouseInput() {
         CustomizationControls::MouseSample sample;
@@ -327,7 +380,7 @@ namespace CustomizationCamera
         const auto controls = CustomizationControls::Runtime();
         static CustomizationControls::State lastControls;
         if(!CustomizationControls::Equal(lastControls,controls)) {
-            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;Mouse.Reset();
+            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;Mouse.Reset();VehicleOrbit.Clear();
         }
         if (!controls.enabled || *reinterpret_cast<int*>(0x925E90) != 6 || !mainView ||
             (NativeMouseVerified && reinterpret_cast<bool(__cdecl*)()>(0x468390)()) ||
@@ -337,6 +390,7 @@ namespace CustomizationCamera
             LastOrbitTick = 0;
             WaitForNeutral = false;
             Mouse.Reset();
+            VehicleOrbit.Clear();
             original(matrix, eye, look, up);
             return;
         }
@@ -352,6 +406,7 @@ namespace CustomizationCamera
         const bool viewChanged=LastOrbitTick&&
             (LastMover!=mover||(NativeViewVerified&&!SameView(view,LastView)));
         LastView=view;
+        if(viewChanged||LastMover!=mover||!LastOrbitTick||now-LastOrbitTick>250)VehicleOrbit.Clear();
         const bool nativeBack=NativeLookBackVerified&&*(static_cast<const BYTE*>(mover)+0xA1);
         const bool takeover=reset||x!=0||y!=0||nativeBack||viewChanged;
         const auto mouseSample=MouseInput();
@@ -405,19 +460,28 @@ namespace CustomizationCamera
             ((view.desired>=0&&view.desired<32&&(Config.fixedEyePovMask&(1u<<view.desired)))||
              (view.current>=0&&view.current<32&&(Config.fixedEyePovMask&(1u<<view.current))));
         CustomizationOrbit::Pose native={{eye->x,eye->y,eye->z},{look->x,look->y,look->z}};
-        if(controls.vehicleHeading&&NativeHeadingVerified&&view.anchor) {
-            const auto forward=reinterpret_cast<const Vec*>(view.anchor+0x50);
-            CustomizationOrbit::Pose aligned;
-            if(CustomizationOrbit::VehicleHeading(native,{forward->x,forward->y,forward->z},fixedEye,nativeBack,aligned))native=aligned;
-        }
         CustomizationOrbit::Pose rotated;
-        if(!CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated,Mouse.zoom)) {
+        Vec lockedUp{};const Vec* orbitUp=up;
+        bool composed=false;
+        if(controls.vehicleHeading&&NativeHeadingVerified&&view.anchor) {
+            const auto position=reinterpret_cast<const Vec*>(view.anchor+0x20);
+            const auto forward=reinterpret_cast<const Vec*>(view.anchor+0x50);
+            const auto vehicleUp=reinterpret_cast<const Vec*>(view.anchor+0x70);
+            CustomizationOrbit::Frame frame;
+            if(CustomizationOrbit::VehicleFrame({position->x,position->y,position->z},
+                {forward->x,forward->y,forward->z},{vehicleUp->x,vehicleUp->y,vehicleUp->z},frame)) {
+                composed=VehicleOrbit.Compose(native,frame,fixedEye,nativeBack,Yaw,Pitch,Mouse.zoom,rotated);
+                if(composed){lockedUp={frame.up.x,frame.up.y,frame.up.z,0};orbitUp=&lockedUp;}
+            }
+        }
+        if(!composed)composed=CustomizationOrbit::Rotate(native,Yaw,Pitch,fixedEye,rotated,Mouse.zoom);
+        if(!composed) {
             original(matrix,eye,look,up);return;
         }
         Mirror.Observe(now,Yaw,Pitch);
         const Vec orbitEye={rotated.eye.x,rotated.eye.y,rotated.eye.z,0};
         const Vec orbitLook={rotated.look.x,rotated.look.y,rotated.look.z,0};
-        original(matrix,&orbitEye,&orbitLook,up);
+        original(matrix,&orbitEye,&orbitLook,orbitUp);
     }
 
     static void __declspec(naked) OrbitLookAtCave()
@@ -518,7 +582,10 @@ namespace CustomizationCamera
         const unsigned char lookBackUpdate[] = {0x8A,0x86,0xA1,0,0,0,0x84,0xC0};
         const unsigned char anchorMatrix[]={0x8D,0x46,0x50,0x57,0x50,0xE8,0x14,0xC0,0xFD,0xFF};
         const unsigned char anchorRead[]={0x8B,0x8E,0x80,0,0,0};
-        NativeHeadingVerified=Matches(0x468FC2,anchorMatrix)&&Matches(0x47D41C,anchorRead);
+        const unsigned char anchorPosition[]={0xD9,0x40,0x20};
+        const unsigned char anchorUp[]={0xD9,0x40,0x74,0x8B,0x50,0x70,0xD9,0x40,0x78};
+        NativeHeadingVerified=Matches(0x468FC2,anchorMatrix)&&Matches(0x47D41C,anchorRead)&&
+            Matches(0x476738,anchorPosition)&&Matches(0x47D835,anchorUp);
         if(!NativeHeadingVerified)Report("Vehicle heading layout not verified; vehicle-relative orbit disabled.");
         NativeLookBackVerified = Matches(0x4741A0,lookBackSetter) &&
             Matches(0x4741D0,lookBackGetter) && Matches(0x47D7ED,lookBackUpdate);
@@ -547,7 +614,9 @@ namespace CustomizationCamera
             if(Matches(0x595D40,mirrorEntry)&&Matches(0x6CFB75,mirrorEnter)&&Matches(0x6CFBC8,mirrorLeave)) {
                 injector::MakeCALL(0x6CFB75,MirrorVisible,true);
                 injector::MakeCALL(0x6CFBC8,MirrorVisible,true);
-                CustomizationControls::SetMirrorAvailable(true);
+                const bool radar=InstallRadarHook();
+                CustomizationControls::SetMirrorAvailable(true,radar);
+                if(!radar)Report("Radar HUD layout differs or is already hooked; orbit radar suppression disabled.");
             } else Report("Native mirror visibility layout differs; orbit auto-hide disabled.");
         }
         else Report("Race orbit signature mismatch; orbit hook not installed.");

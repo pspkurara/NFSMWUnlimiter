@@ -88,11 +88,13 @@ centers on native look-back or POV/anchor/lag changes by default. A view change
 waits for neutral input before another rate orbit so a held stick does not undo
 that change immediately.
 
-The current state version 4 appends separate vehicle-heading and mirror policies.
-Legacy payloads (72-byte version 1, 76-byte version 2, 88-byte version 3) verify
+The current state version 5 adds independent Rate, Direction and mouse inversion,
+plus the radar policy during camera mirror auto-hide. Legacy payloads (72-byte
+version 1, 76-byte version 2, 88-byte version 3, 96-byte version 4) verify
 the original length, CRC and native revision before migration. Existing mode,
-bindings and tuning are preserved; newly introduced policies remain off. The next
-successful save writes the 96-byte state without changing native save bytes.
+bindings and tuning are preserved; legacy inversion initializes all three input
+sources to the previous behavior. The next successful save writes the 116-byte
+state without changing native save bytes.
 
 ## Mouse orbit
 
@@ -122,12 +124,13 @@ still need in-game validation, including menus, pause, controllers and remappers
 ## Vehicle heading and mirror policies
 
 These are independent switches, separate from Rate/Direction mode and mouse input.
-`Keep orbit relative to vehicle heading` replaces native horizontal bearing with
-the raw CameraAnchor vehicle heading, including at neutral. Camera target,
-elevation and distance retain their native values; this removes yaw lag rather
-than rigidly welding the entire camera transform to the body. It does not add
-new collision avoidance after orbit rotation. First-person views retain their
-native eye. Standard look-back composes with the selected heading basis.
+`Keep orbit relative to vehicle heading` captures the native camera in the full
+vehicle-local frame, including elevation and target. Native yaw/elevation animation
+cannot change that reference until a POV/mover/settings change or context reset.
+Native collision pull-in can shorten the external radius. This does not add new
+collision avoidance after orbit rotation. First-person position is captured in
+the same vehicle frame; standard look-back reverses the bearing without changing
+the locked elevation.
 
 `Deadzone (0..0.95)` already sets the stick response threshold (default 0.22).
 The radial live range is rescaled after the deadzone. Rate mode with return delay
@@ -146,6 +149,19 @@ saved Rearview setting; this feature never forces a normally hidden mirror on.
 
 Both verified PC calls to the native mirror predicate (0x6CFB75/0x6CFBC8,
 callee 0x595D40) use the same native view-mode path for scene and mask. Unknown
-code ownership leaves the feature disabled in the editor. The saved version-4
-flag and controls transaction are unchanged. Native visual validation remains
-required, including a mirror-capable POV and transitions to/from pause.
+code ownership leaves the feature disabled in the editor. Native visual validation
+remains required, including a mirror-capable POV and transitions to/from pause.
+
+`Show radar during camera mirror auto-hide` is independent and defaults OFF.
+While the camera temporarily hides a normally visible mirror, the guarded radar
+Update hook runs native detection/audio first, then selects the native HIDE script
+for the detector group and both backings. Native Update restores its own scripts
+when orbit returns to neutral. No FE pointers survive an update. A mirror disabled
+in the game's saved options keeps the normal native no-mirror detector display;
+this switch does not suppress that display. An unavailable radar hook disables
+only this checkbox, preserving native HUD behavior.
+
+Rate, Direction and mouse X/Y inversion are independently editable and saved.
+Garage input is a rate camera and can inherit Rate inversion through the garage
+INI. A connected neutral stick does not call native rotation setters: those setters
+would otherwise change the automatic garage camera to manual even at zero speed.
