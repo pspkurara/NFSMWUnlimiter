@@ -50,6 +50,50 @@ def chunks(b, a=0, z=None):
             yield from chunks(b, p + 8, p + 8 + n)
         p += 8 + n
 
+def triangle_evidence(solid, nodes, materials, positions):
+    blocks = [(p, n) for tag, p, n in nodes if tag == 0x134B03]
+    if len(blocks) != 1:
+        return {'verified': False, 'reason': 'Expected one triangle-index block'}
+    p, size = blocks[0]
+    cursor = (p+15) & ~15
+    expected = sum(m['triangles'] for m in materials)*6
+    padding = (-expected) % 4
+    if cursor+expected+padding != p+size or any(solid[cursor+expected:p+size]):
+        return {'verified': False, 'reason': 'Triangle count does not match aligned index payload'}
+    groups = []
+    offsets = [0]*len(positions)
+    for material in materials:
+        vertices = positions[material['stream']]
+        first = offsets[material['stream']]
+        last = first+material['vertices']
+        offsets[material['stream']] = last
+        count = material['triangles']*3
+        indices = struct.unpack_from(f'<{count}H', solid, cursor)
+        cursor += count*2
+        if vertices is None or (indices and max(indices) >= len(vertices)):
+            return {'verified': False, 'reason': 'Unsupported vertex stream or out-of-range index'}
+        if not indices:
+            groups.append({'triangles': 0})
+            continue
+        bounds = [[min(vertices[v][axis] for v in indices) for axis in range(3)],
+                  [max(vertices[v][axis] for v in indices) for axis in range(3)]]
+        error = max(abs(bounds[end][axis]-material['bounds'][end][axis])
+                    for end in range(2) for axis in range(3))
+        contains = all(material['bounds'][0][axis] <= bounds[0][axis]+.00001 and
+                       material['bounds'][1][axis] >= bounds[1][axis]-.00001 for axis in range(3))
+        groups.append({'triangles': count//3, 'minimumIndex': min(indices), 'maximumIndex': max(indices),
+                       'referencedBounds': bounds, 'materialBoundsError': error,
+                       'withinMaterialVertexRange': min(indices) >= first and max(indices) < last,
+                       'insideMaterialBounds': contains})
+    # A geometric cross-check avoids choosing an index convention just because
+    # it happens to stay in the full stream's numeric range.
+    # Native material AABBs can include a deliberate margin (Punto uses 1 cm).
+    # Require containment plus the exact material vertex partition, not equality.
+    verified = all(g.get('withinMaterialVertexRange', True) and g.get('insideMaterialBounds', True) for g in groups)
+    return {'verified': verified, 'indexConvention': 'vertex-stream relative', 'paddingBytes': padding, 'groups': groups,
+            'triangles': sum(m['triangles'] for m in materials)}
+
+
 def inspect(root, car):
     if Path(car).name != car or car in ('.', '..'):
         raise ValueError('Expected a single car directory name')
@@ -83,17 +127,22 @@ def inspect(root, car):
                 continue
             for pos in range(begin, p + n, 104):
                 effect, _, flags, vertices, triangles = struct.unpack_from('<5I', solid, pos + 48)
-                materials.append({'effect': effect, 'flags': flags, 'vertices': vertices, 'triangles': triangles})
+                bounds = [list(struct.unpack_from('<3f', solid, pos)),
+                          list(struct.unpack_from('<3f', solid, pos+12))]
+                materials.append({'effect': effect, 'flags': flags, 'vertices': vertices,
+                                  'triangles': triangles, 'bounds': bounds})
         record['materials'] = materials
         streams = []
         for material in materials:
             if not streams or streams[-1]['effect'] != material['effect']:
                 streams.append({'effect': material['effect'], 'vertices': 0})
+            material['stream'] = len(streams)-1
             streams[-1]['vertices'] += material['vertices']
         buffers = [(p, n) for tag, p, n in nodes if tag == 1264385]
         if len(buffers) != len(streams):
             record['error'] = 'Stream/effect count mismatch'
         else:
+            positions = []
             for stream, (p, n) in zip(streams, buffers):
                 begin = p + 127 & ~127
                 size = p + n - begin
@@ -102,14 +151,17 @@ def inspect(root, car):
                 stream['stride'] = stride
                 if stream['effect'] not in (0, 4, 5) or stride != 36:
                     stream['supported'] = False
+                    positions.append(None)
                 else:
                     vertices = [struct.unpack_from('<3f', solid, begin + i * stride) for i in range(count)]
+                    positions.append(vertices)
                     if not all((math.isfinite(x) for vertex in vertices for x in vertex)):
                         raise ValueError('Nonfinite positions: ' + name)
                     stream['supported'] = True
                     stream['bounds'] = [[min((v[i] for v in vertices)) for i in range(3)], [max((v[i] for v in vertices)) for i in range(3)]]
                     stream['normalLengthRange'] = [min((sum((x * x for x in struct.unpack_from('<3f', solid, begin + i * stride + 12))) for i in range(count))), max((sum((x * x for x in struct.unpack_from('<3f', solid, begin + i * stride + 12))) for i in range(count)))]
                 record['buffers'].append(stream)
+            record['topology'] = triangle_evidence(solid, nodes, materials, positions)
         result.append(record)
     return result
 if __name__ == '__main__':

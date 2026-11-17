@@ -12,8 +12,21 @@ The report records selected BASE/BODY/brake/wheel LOD-A solids, material effect
 and vertex counts, stream stride, finite position bounds, normal-length range,
 and the asset pivot matrix/determinant. Only confirmed 36-byte effects 0/4/5 are
 decoded as positions/normals; other formats remain marked unsupported. This is
-not a general geometry exporter and does not reconstruct triangle topology yet.
+not a general geometry exporter. Its triangle report checks aligned u16 index
+payloads, zero tail padding, material vertex partitions, index range and
+containment in declared material AABBs. It reports derived triangle bounds without
+exporting the source vertices or indices.
 Do not feed its bounding boxes directly into production fender clipping.
+
+On these 17 solids, 64,918 triangles passed the checks. Multi-material Fiat BASE
+indices are relative to the complete vertex stream, not reset for each material;
+the material's contiguous vertex partition still bounds its references. Some
+payloads have two zero alignment bytes and Punto AABBs include a 1 cm margin.
+Exact AABB equality would incorrectly reject those native surfaces.
+`python -m unittest discover -s tests -p stance_geometry_tests.py` covers valid
+partitions, wrong local indices, out-of-stream indices, expanded bounds and
+nonzero/incorrect tail padding. These checks do not prove a fender shape or its
+runtime coordinate transform.
 
 Read-only measurements on the installed REDUX assets, 2026-11-17:
 
@@ -47,7 +60,7 @@ eSolidPlat.hpp explicitly warns that its platform structure comes from another
 game/platform; it is insufficient evidence for a production memory layout.
 
 Next implementation evidence needed: verified PC runtime mesh/material layout,
-triangle reconstruction and coordinate/pivot use; measured arch contours around
+runtime triangle-buffer binding and coordinate/pivot use; measured arch contours around
 native axle references; a boundary representation that preserves lower/inner
 wheel geometry. The existing single half-space cannot represent a general wheel
 arch, so automatic fitting must not silently approximate every car with it.
