@@ -37,3 +37,19 @@ fixtures, stock and Unlimiter load-order checks, unchanged dependency file hash,
 native cart cancellation/purchase and save/reload, and garage/race geometry with
 both owned and random cars. Keep this work separate from the running validation
 session until those checks support deployment.
+
+An experimental NFSMWStanceHost target now builds without Unlimiter implementation
+headers. It chains the existing game Setup entry, observes both random-parts call
+sites after their current targets return, and accepts the cart-name call target
+only when owned by the loaded dependency. It currently recognizes the 3.3.1 layout
+family and rejects the integrated fork to avoid duplicate hooks. It is excluded
+from installation snapshots; native chaining, startup order and runtime QA are
+still pending. Its shared camera/frame support also needs isolation review before
+calling this a standalone stance product. A successful compile is not release
+evidence or proof of compatibility with newer layout families.
+
+Runtime follow-ups reported during integration QA: the initial My Cars viewer
+does not yet reflect saved stance; body-mounted race effects (light flares and
+other emitters) need the body adjustment, while tire effects must follow contact
+geometry. Owned My Cars stance in a custom race was confirmed by the user after
+the early customization-copy fix on 2026-11-18.

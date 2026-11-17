@@ -110,7 +110,8 @@ MWCL_FORGET_CAVE(RecordDefault,ForgetRecord,OriginalRecordDefault)
 MWCL_FORGET_CAVE(RecordPreset,ForgetRecord,OriginalRecordPreset)
 #undef MWCL_FORGET_CAVE
 
-static bool Install(bool randomPartsEnabled) {
+using RandomObserver=void(__cdecl*)(DWORD*);
+static bool Install(bool randomPartsEnabled,RandomObserver* observer=nullptr) {
     if(HooksReady)return true;
     if(!randomPartsEnabled||!CustomizationSave::HooksReady)return false;
     struct Hook {uintptr_t address;void* replacement;void** original;std::vector<unsigned char> bytes;};
@@ -137,7 +138,7 @@ static bool Install(bool randomPartsEnabled) {
         CustomizationSave::TransientRideCopy=&RideCopy;
         CustomizationSave::TransientRecordCopy=&RecordCopy;
         CustomizationSave::TransientRecordWrite=&RecordWritten;
-        HooksReady=true;RideInfoRandomObserver=&Randomized;
+        HooksReady=true;if(observer)*observer=&Randomized;
         CustomizationSave::Log("Random stance lifecycle installed; sampling follows random parts only.");return true;
     }
     for(size_t i=0;i<created;++i) {MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}

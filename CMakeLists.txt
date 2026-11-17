@@ -19,6 +19,14 @@ target_compile_definitions(NFSMWExtendedCamera PRIVATE _CRT_SECURE_NO_WARNINGS N
 target_compile_options(NFSMWExtendedCamera PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(NFSMWExtendedCamera PRIVATE minhook bcrypt)
 set_target_properties(NFSMWExtendedCamera PROPERTIES PREFIX "" SUFFIX ".asi")
+
+# Experimental distribution host: no Unlimiter source or implementation linkage.
+add_library(NFSMWStanceHost SHARED standalone/stance.cpp)
+target_include_directories(NFSMWStanceHost PRIVATE includes)
+target_compile_definitions(NFSMWStanceHost PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(NFSMWStanceHost PRIVATE /W3 /utf-8 /EHsc /Zc:strictStrings-)
+target_link_libraries(NFSMWStanceHost PRIVATE minhook bcrypt version)
+set_target_properties(NFSMWStanceHost PROPERTIES PREFIX "" SUFFIX ".asi")
 enable_testing()
 add_executable(customization_math_tests tests/customization_math_tests.cpp)
 target_compile_options(customization_math_tests PRIVATE /W4 /utf-8 /EHsc)

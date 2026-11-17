@@ -1,5 +1,6 @@
 #pragma once
 #include "CustomizationSave.h"
+#include "CustomizationStanceCart.h"
 #include "CustomizationStanceSession.h"
 #include "CustomizationStanceAssets.h"
 #include "CustomizationFrontendList.h"
@@ -594,7 +595,7 @@ void AddPartsOption(DWORD* screen) {
     const int count=bList_TraversebList(reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(screen)+0x30),nullptr);
     ReturnIndex=count>0&&count<=255?unsigned(count):1;
 }
-static bool Install() {
+static bool Install(uintptr_t compatibleCartName=0) {
     if(Installed)return true;
     CustomizationCamera::Settings menuSettings;
     NormalStep=CustomizationCamera::Number(menuSettings,"StanceMenu","StepMultiplier",5,.01f,1000);
@@ -619,7 +620,7 @@ static bool Install() {
     if(std::memcmp(reinterpret_cast<void*>(0x585AA0),"\x57\x8B\x7C\x24\x08\x8B\x07",7)||
        std::memcmp(reinterpret_cast<void*>(0x585820),"\x53\x56\x8B\x74\x24\x0C",6))return false;
     const auto status=MH_Initialize();if(status!=MH_OK&&status!=MH_ERROR_ALREADY_INITIALIZED)return false;
-    if(!CustomizationStanceCart::Install()) {
+    if(!CustomizationStanceCart::Install(compatibleCartName)) {
         CustomizationSave::Log("Native stance menu disabled: cart ownership hooks unavailable.");return false;
     }
     NameHash=bStringHash("MWCL_STANCE_ADJUSTMENT");PackageHash=0xFFFFFFFF;

@@ -371,9 +371,9 @@ int Init()
 
 	const bool lifecycleReady=CustomizationProfileHost::Install();
 	CustomizationSave::Install();
-	CustomizationRandom::Install(RandomHook);
+	CustomizationRandom::Install(RandomHook,&RideInfoRandomObserver);
 	CustomizationControls::Install(lifecycleReady);
 	CustomizationCamera::Install();
-    CustomizationStanceMenu::Install();
+    CustomizationStanceMenu::Install(reinterpret_cast<uintptr_t>(&FEShoppingCartItem_DrawPartName));
 	return 0;
 }

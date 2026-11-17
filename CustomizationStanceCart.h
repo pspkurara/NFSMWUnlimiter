@@ -157,7 +157,7 @@ static bool Accept(uint64_t owner) {
     ++Manager()[0x1BC/4];
     Item=item;Owner=owner;Revision=revision;AppliedEnabled=enabled;return true;
 }
-static bool Install() {
+static bool Install(uintptr_t compatibleNameTarget=0) {
     if(Installed)return true;
     struct Hook {uintptr_t address;void* target;void** original;std::vector<BYTE> bytes;};
     const Hook hooks[]={
@@ -174,7 +174,7 @@ static bool Install() {
        *reinterpret_cast<const DWORD*>(0x8B751C)!=0x7A9F40)return false;
     if(*reinterpret_cast<const BYTE*>(0x7BB17B)!=0xE8)return false;
     const auto nameTarget=uintptr_t(0x7BB180+*reinterpret_cast<const int32_t*>(0x7BB17C));
-    if(nameTarget!=0x7B63A0&&nameTarget!=reinterpret_cast<uintptr_t>(&FEShoppingCartItem_DrawPartName))return false;
+    if(nameTarget!=0x7B63A0&&nameTarget!=compatibleNameTarget)return false;
     OriginalName=reinterpret_cast<NameFn>(nameTarget);
     size_t created=0;bool ok=true;
     for(const auto& hook:hooks){if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.target,hook.original)!=MH_OK){ok=false;break;}++created;}

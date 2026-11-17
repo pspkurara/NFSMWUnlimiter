@@ -110,7 +110,7 @@ static bool __fastcall Load(DWORD* profile,void*,void* buffer,int size,bool comm
     return result;
 }
 static const Api* FindPeer() {
-    for(const char* name:{"NFSMWUnlimiter.asi","NFSMWExtendedCamera.asi"}) {
+    for(const char* name:{"NFSMWUnlimiter.asi","NFSMWExtendedCamera.asi","NFSMWStanceHost.asi"}) {
         auto module=GetModuleHandleA(name);if(!module)continue;
         auto getter=reinterpret_cast<const Api*(__cdecl*)()>(GetProcAddress(module,"MWCL_GetProfileHostV1"));
         if(!getter)getter=reinterpret_cast<decltype(getter)>(GetProcAddress(module,"_MWCL_GetProfileHostV1"));
