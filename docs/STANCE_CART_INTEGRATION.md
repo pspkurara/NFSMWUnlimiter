@@ -74,9 +74,15 @@ Do not assume that overriding InstallPart alone protects the direct record call.
 
 ## Next implementation and checks
 
-Implement a small platform-independent shop transaction state machine with
-owner-bound absolute snapshots and tests for reopen/replace/cancel/remove/buy,
-failed buy, profile changes and disk-save exclusion. Connect it to a guarded PC
+CustomizationStanceShop.h now implements the platform-independent state machine
+with owner-bound absolute snapshots, separate purchased/cart/editor layers,
+revision-tagged replacement/removal and a frozen checkout snapshot. Tests cover
+reopen/replace/cancel/remove/buy, failed buy, owner changes, repeated checkout,
+invalid input, purchased-state exclusion and eight accept/reopen adjustments
+that must stop at the same absolute lower bound. This code is not yet connected
+to the running adapter and does not itself fix the live shop.
+
+Connect it to a guarded PC
 adapter using a tagged native cart item, retaining native allocation/destruction
 and list ownership. Check the actual native UI row formatting before introducing
 a synthetic part. The adapter must handle native install bypass and labels for

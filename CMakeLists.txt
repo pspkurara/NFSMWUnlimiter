@@ -52,6 +52,10 @@ add_executable(customization_stance_session_tests tests/customization_stance_ses
 target_compile_options(customization_stance_session_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_stance_session COMMAND customization_stance_session_tests)
 
+add_executable(customization_stance_shop_tests tests/customization_stance_shop_tests.cpp)
+target_compile_options(customization_stance_shop_tests PRIVATE /W4 /utf-8 /EHsc)
+add_test(NAME customization_stance_shop COMMAND customization_stance_shop_tests)
+
 add_executable(customization_stance_assets_tests tests/customization_stance_assets_tests.cpp)
 target_compile_options(customization_stance_assets_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_stance_assets COMMAND customization_stance_assets_tests)
