@@ -15,13 +15,6 @@ if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $manifest.inspec
 }
 # A loaded ASI must never be replaced. Unknown process paths fail closed too.
 foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='speed.exe'")) {
-    # WER can retain a terminated process object after an access violation.
-    # Only a live process can still have the ASI loaded; query failures other
-    # than a vanished PID still fail closed under ErrorActionPreference=Stop.
-    try { $live = [Diagnostics.Process]::GetProcessById([int]$process.ProcessId) }
-    catch [ArgumentException] { continue }
-    try { if ($live.HasExited) { continue } }
-    finally { $live.Dispose() }
     if (!$process.ExecutablePath -or [IO.Path]::GetFullPath($process.ExecutablePath) -eq [IO.Path]::GetFullPath($exe)) {
         throw 'Save and normally exit this game before installing.'
     }
