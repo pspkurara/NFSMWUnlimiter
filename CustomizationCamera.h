@@ -328,6 +328,7 @@ namespace CustomizationCamera
     static ULONGLONG LastOrbitTick = 0, LastOrbitInput = 0;
     static void* LastMover = nullptr;
     static bool WaitForNeutral = false;
+    static bool RateOwned = false;
     struct ViewStamp { uintptr_t anchor=0; int desired=0,current=0; BYTE lag=0; };
     static ViewStamp LastView;
     static CustomizationControls::MouseOrbit Mouse;
@@ -403,7 +404,7 @@ namespace CustomizationCamera
         const auto controls = CustomizationControls::Runtime();
         static CustomizationControls::State lastControls;
         if(!CustomizationControls::Equal(lastControls,controls)) {
-            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;Mouse.Reset();VehicleOrbit.Clear();
+            lastControls=controls;LastOrbitTick=0;Yaw=Pitch=0;WaitForNeutral=false;RateOwned=false;Mouse.Reset();VehicleOrbit.Clear();
         }
         if (!controls.enabled || *reinterpret_cast<int*>(0x925E90) != 6 || !mainView ||
             (NativeMouseVerified && reinterpret_cast<bool(__cdecl*)()>(0x468390)()) ||
@@ -412,6 +413,7 @@ namespace CustomizationCamera
             Yaw = Pitch = 0;
             LastOrbitTick = 0;
             WaitForNeutral = false;
+            RateOwned = false;
             Mouse.Reset();
             VehicleOrbit.Clear();
             original(matrix, eye, look, up);
@@ -439,7 +441,7 @@ namespace CustomizationCamera
 
         if(!directionMode&&Config.resetOnViewChange&&viewChanged)WaitForNeutral=true;
         if(WaitForNeutral&&!directionMode) {
-            Yaw=Pitch=0;LastMover=mover;LastOrbitTick=LastOrbitInput=now;
+            Yaw=Pitch=0;RateOwned=false;VehicleOrbit.Clear();LastMover=mover;LastOrbitTick=LastOrbitInput=now;
             if(x==0&&y==0)WaitForNeutral=false;
             original(matrix,eye,look,up);return;
         }
@@ -449,6 +451,7 @@ namespace CustomizationCamera
             nativeBack)
         {
             Yaw = Pitch = 0;
+            RateOwned=false;VehicleOrbit.Clear();
             LastMover = mover;
             LastOrbitTick = LastOrbitInput = now;
             original(matrix, eye, look, up);
@@ -457,25 +460,30 @@ namespace CustomizationCamera
         if (LastMover != mover || !LastOrbitTick || now - LastOrbitTick > 250)
         {
             Yaw = Pitch = 0;
+            RateOwned=false;
             LastOrbitInput = now;
             LastMover = mover;
         }
         float dt = LastOrbitTick ? Clamp(float(now - LastOrbitTick) * 0.001f, 0, 0.1f) : 0;
         LastOrbitTick = now;
-        if (reset) Yaw = Pitch = 0;
+        if(Mouse.owns)RateOwned=false;
+        if (reset) {Yaw = Pitch = 0;RateOwned=false;VehicleOrbit.Clear();}
         else if (!Mouse.owns && (directionMode || x != 0 || y != 0))
         {
             CustomizationControls::ApplyAxes(controls,x,y,dt,Yaw,Pitch);
+            RateOwned=!directionMode;
             LastOrbitInput = now;
         }
         else if (!Mouse.owns && controls.returnDelay >= 0 && now - LastOrbitInput >= ULONGLONG(controls.returnDelay * 1000))
         {
             Yaw = ApproachZero(Yaw, controls.returnSpeed * dt);
             Pitch = ApproachZero(Pitch, controls.returnSpeed * dt);
+            if(Yaw==0&&Pitch==0)RateOwned=false;
         }
         if(mouseActivity)LastOrbitInput=now;
-        if (Yaw == 0 && Pitch == 0 && Mouse.zoom == 1 && !controls.vehicleHeading)
+        if (!CustomizationControls::CameraOverride(controls,x,y,Yaw,Pitch,Mouse.zoom,reset,RateOwned||Mouse.owns))
         {
+            VehicleOrbit.Clear();
             original(matrix, eye, look, up);
             return;
         }
