@@ -180,6 +180,9 @@ reliable automatic implementation requires explicit inner-face/clearance markers
 or a verified native wheel material/triangle surface representation. Do not
 replace this with guessed global brake offsets.
 
+Read-only selected-model measurements and the requirements for automatic
+boundary detection are recorded in [geometry research](docs/STANCE_GEOMETRY_RESEARCH.md).
+
 ## Sources
 
 - Microsoft [IDirect3DDevice9::SetClipPlane](https://learn.microsoft.com/en-us/windows/win32/api/d3d9/nf-d3d9-idirect3ddevice9-setclipplane)
