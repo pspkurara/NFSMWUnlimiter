@@ -167,3 +167,26 @@ Automatic stance selection is now implemented with separate bounded ranges and
 grouped presets; its native random-part and copy lifecycle is documented in
 STANCE_RANDOMIZATION.md. Fixture coverage includes the extra static CarViewer
 copy used between Quick Race reroll and accept. Live runtime QA remains pending.
+# Camera update installed on 2026-11-17
+
+The original REDUX installation now has the baseline-preserving camera update
+from `dist/camera-update-20261117-154850`. Installed `NFSMWUnlimiter.asi` SHA-256:
+`dbe9ea0d76c495eb295ed375a53b770ac422226f44e99a5ee8c416c9847bda2e`.
+The receipt and previous ASI are in
+`research/customization-original-backups/camera-20261117-155159` in the workspace.
+Only that ASI was replaced; user INIs, companion, native saves and the private
+stance test installation were unchanged. The package asserts every non-camera
+baseline source file is identical to baseline 18894c9. Its four tests pass.
+
+This installs the vehicle-local elevation lock, independent input inversion,
+neutral garage-input ownership fix and separate temporary mirror/radar policy.
+In-game verification of these changes remains outstanding. Existing version-4
+controls data is read and migrated in memory; the next successful native save
+writes version 5, preserving the legacy inversion for all input sources.
+
+The exited original game retained PID 46168 with exit code 0 and no window while
+its process object remained unsignaled. The installer correctly refused this
+state. After checking the exact executable path and exit code, that leftover
+process was terminated; its process object then signaled and installation passed.
+The installer distinguishes signaled terminated process objects still listed by
+CIM from live or unsignaled ones, and fails closed on query/permission errors.

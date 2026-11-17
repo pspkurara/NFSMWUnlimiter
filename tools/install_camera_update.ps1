@@ -5,6 +5,31 @@ param(
     [Parameter(Mandatory)][string]$BackupRoot
 )
 $ErrorActionPreference='Stop'
+# A terminated process can remain in CIM while another tool holds its handle.
+# Only the kernel's signaled process object proves it is safe to ignore that PID.
+if (-not ('CameraInstallProcess' -as [type])) {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class CameraInstallProcess {
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    public static bool Running(uint pid) {
+        IntPtr handle=OpenProcess(0x100000,false,pid);
+        if(handle==IntPtr.Zero) return Marshal.GetLastWin32Error()!=87;
+        try { return WaitForSingleObject(handle,0)!=0; }
+        finally { CloseHandle(handle); }
+    }
+}
+'@
+}
+function Test-GameRunning {
+    foreach ($gameProcess in @(Get-CimInstance Win32_Process -Filter "Name='speed.exe'")) {
+        if ([CameraInstallProcess]::Running($gameProcess.ProcessId)) { return $true }
+    }
+    return $false
+}
 $stage=(Resolve-Path -LiteralPath $Snapshot).Path
 $game=(Resolve-Path -LiteralPath $GamePath).Path
 $manifest=Get-Content -LiteralPath (Join-Path $stage 'manifest.json') -Raw | ConvertFrom-Json
@@ -21,7 +46,7 @@ $oldHash=(Get-FileHash -LiteralPath $target).Hash
 if ($oldHash -notin @('24608d38dd6e546d40d72db55c4bc30c441ab4ffe4546baeb7ae29ee58c930de',
     '24463a2bf4580f7dfa3f99b35307480c06f8a21a9d910e61a66db6988abbb919')) { throw 'Installed ASI differs from the recorded baseline.' }
 if ((Get-FileHash -LiteralPath $source).Hash -ne $manifest.sha256) { throw 'Payload hash mismatch.' }
-if (@(Get-CimInstance Win32_Process -Filter "Name='speed.exe'").Count) { throw 'Normally exit all game instances before installing.' }
+if (Test-GameRunning) { throw 'Normally exit all game instances before installing.' }
 if (!$PSCmdlet.ShouldProcess($target,'Install camera-only update with rollback backup')) { return }
 $backup=Join-Path ([IO.Path]::GetFullPath($BackupRoot)) ('camera-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $backup | Out-Null
@@ -32,7 +57,7 @@ $receipt | ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8
 $writeAttempted=$false
 try {
     # Recheck immediately before writing; never overwrite a loaded module.
-    if (@(Get-CimInstance Win32_Process -Filter "Name='speed.exe'").Count) { throw 'Game restarted during preparation.' }
+    if (Test-GameRunning) { throw 'Game restarted during preparation.' }
     $writeAttempted=$true
     Copy-Item -LiteralPath $source -Destination $target -Force
     if ((Get-FileHash -LiteralPath $target).Hash -ne $manifest.sha256) { throw 'Installed hash mismatch.' }
