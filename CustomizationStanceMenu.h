@@ -85,6 +85,24 @@ static SetupFn OriginalSetup=nullptr,OriginalDestructor=nullptr;
 static NotifyFn OriginalNotify=nullptr,OriginalShowcaseNotify=nullptr;
 static FactoryFn OriginalFactory=nullptr;
 static DrawFn OriginalDraw=nullptr;
+using SoundFn=int(__thiscall*)(DWORD*,unsigned,int);
+static SoundFn OriginalSound=nullptr;
+static int __fastcall Sound(DWORD* screen,void*,unsigned message,int sound) {
+    // Native customization uses the generic installation cue for suspension.
+    // Keep dialog sounds and every unrelated screen on their original path.
+    if(screen==Screen&&ResetChannel<0&&sound==4)return 50;
+    return OriginalSound(screen,message,sound);
+}
+static void InstallFeedback() {
+    constexpr uintptr_t address=0x573C60;
+    const BYTE entry[]={0x8B,0x44,0x24,0x04,0x3D,0x92,0x27,0x12,0x48};
+    if(*reinterpret_cast<const DWORD*>(0x8A2A7C)!=address||
+       std::memcmp(reinterpret_cast<const void*>(address),entry,sizeof(entry))||
+       MH_CreateHook(reinterpret_cast<void*>(address),&Sound,reinterpret_cast<void**>(&OriginalSound))!=MH_OK)return;
+    if(MH_EnableHook(reinterpret_cast<void*>(address))!=MH_OK) {
+        MH_RemoveHook(reinterpret_cast<void*>(address));OriginalSound=nullptr;
+    }
+}
 static ActFn OriginalAct=nullptr;
 static ReactFn OriginalReact=nullptr;
 using ScreenInfoFn=unsigned(__cdecl*)(const char*,int);
@@ -567,7 +585,7 @@ void AddPartsOption(DWORD* screen) {
     // Exactly the PC native CustomizeMainOption construction, without interpreting
     // our extension category as a native unlockable part or charging the cart.
     auto option=reinterpret_cast<DWORD*>(j_malloc(0x58));if(!option)return;
-    IconOption_Create(option,bStringHash("VISUAL_PART_BODY"),NameHash,0);
+    IconOption_Create(option,bStringHash("VISUAL_PART_RIMS"),NameHash,0);
     option[0]=0x8B7558;option[0x4C/4]=reinterpret_cast<DWORD>(Package);
     option[0x50/4]=Category|(screen[0x150/4]<<16);option[0x54/4]=1;
     IconScrollerMenu_AddOption(screen,option);
@@ -622,6 +640,7 @@ static bool Install() {
     Installed=true;
     InstallGarageView();
     InstallShowcase();
+    InstallFeedback();
     CustomizationSave::Log("Native body-shop stance menu installed (free grouped adjustment).");return true;
 }
 }

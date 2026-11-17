@@ -178,3 +178,8 @@ instructions against duplicate and nested groups, verifying callback slot 1.
 Showcase also accepts PAD_BUTTON0, the mapped action used by native customization
 screens; direct R3/Space input remains available. Display and transitions need
 live confirmation after installation.
+
+The body-shop entry uses the installed VISUAL_PART_RIMS texture. Its accept cue
+uses the native generic customization sound (50), as suspension/brake tuning
+does, through the tagged screen's sound callback. Other screens and dialogs keep
+the original callback. This optional sound hook does not gate the editor.
