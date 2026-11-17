@@ -197,6 +197,9 @@ original session. The extra SCREEN_TICK polling proposed from the initial report
 was removed; the existing frame observer works. Controller activation and return
 with preview retention still require confirmation. Showcase now receives the
 active FECarRecord argument, as native customization does.
+Select/Back is now accepted alongside R3 and Space, and its visible prompt names
+Select to match the common native Showcase convention. The user confirmed that
+the existing Showcase Back button returns normally.
 
 Deferred presentation request: keep the header to Stance | Both/Front/Rear,
 put units beside each channel, and add right-aligned limit labels on each row.

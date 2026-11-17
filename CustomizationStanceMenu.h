@@ -207,7 +207,7 @@ static void Tick() {
             held=(GetAsyncKeyState(VK_SPACE)&0x8000)!=0;
             XINPUT_STATE pad{};
             if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS)
-                held|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
+                held|=(pad.Gamepad.wButtons&(XINPUT_GAMEPAD_BACK|XINPUT_GAMEPAD_RIGHT_THUMB))!=0;
         }
         if(held&&!InspectHeld)OpenShowcase();
         InspectHeld=held;
@@ -264,7 +264,7 @@ static void Footer() {
                     float position[]={data[7]-(action?300.f:130.f),data[8]-(pc?26.f:0.f),data[9]};
                     reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(prompt,position,false);
                 }
-                SetText(prompt,action?"R3: Showcase":"X: Reset",false);
+                SetText(prompt,action?"Select: Showcase":"X: Reset",false);
             }
         }
     }
@@ -292,7 +292,7 @@ static void Heading(const char* error=nullptr) {
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
     Footer();
-    Text(0x05CDDED4,ShowcaseAvailable?"R3 / Space: Showcase   A: cart   LT/RT: axle   Shift: fine   Ctrl: fast":
+    Text(0x05CDDED4,ShowcaseAvailable?"Select / Space: Showcase   A: cart   LT/RT: axle   Shift: fine   Ctrl: fast":
         "A: cart   LT/RT: axle   X: Reset   Shift: fine   Ctrl: fast");
 }
 static void OpenShowcase() {
