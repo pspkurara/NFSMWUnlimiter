@@ -256,17 +256,25 @@ namespace CustomizationCamera
         if(!SuppressNativeGarageRotation)
             reinterpret_cast<void(__thiscall*)(void*,float)>(Target)(mover,speed);
     }
+    static void __fastcall NativeGarageZoom(void* mover,void*,float speed) {
+        const int mode=*reinterpret_cast<const int*>(static_cast<const BYTE*>(mover)+0x80);
+        if(CustomizationGarageInput::ForwardZoom(SuppressNativeGarageRotation,mode,speed))
+            reinterpret_cast<void(__thiscall*)(void*,float)>(0x476FF0)(mover,speed);
+    }
     static bool InstallNativeGarageRotation() {
-        const uintptr_t sites[]={0x7A241E,0x7A2428,0x7A2455,0x7A2480,0x7A24A4,0x7A24D0};
-        const uintptr_t targets[]={0x476E70,0x476F30,0x476E70,0x476E70,0x476F30,0x476F30};
-        for(unsigned i=0;i<6;++i) {
+        const uintptr_t sites[]={0x7A241E,0x7A2428,0x7A2455,0x7A2480,0x7A24A4,0x7A24D0,0x7A25D1,0x7A2432,0x7A25A1};
+        const uintptr_t targets[]={0x476E70,0x476F30,0x476E70,0x476E70,0x476F30,0x476F30,0x476F30,0x476FF0,0x476FF0};
+        const unsigned char setter[]={0x8B,0x81,0x80,0,0,0,0x33,0xD2};
+        if(!Matches(0x476FF0,setter))return false;
+        for(unsigned i=0;i<std::size(sites);++i) {
             const auto code=reinterpret_cast<const BYTE*>(sites[i]);int32_t displacement=0;
             std::memcpy(&displacement,code+1,sizeof(displacement));
             if(code[0]!=0xE8||sites[i]+5+displacement!=targets[i])return false;
         }
-        for(unsigned i=0;i<6;++i) {
+        for(unsigned i=0;i<std::size(sites);++i) {
             if(targets[i]==0x476E70)injector::MakeCALL(sites[i],&NativeGarageRotate<0x476E70>,true);
-            else injector::MakeCALL(sites[i],&NativeGarageRotate<0x476F30>,true);
+            else if(targets[i]==0x476F30)injector::MakeCALL(sites[i],&NativeGarageRotate<0x476F30>,true);
+            else injector::MakeCALL(sites[i],&NativeGarageZoom,true);
         }
         return true;
     }
@@ -293,7 +301,7 @@ namespace CustomizationCamera
         }
 
         // Disabling the entire branch also discarded mapped trigger zoom.
-        // Preserve native permissions and zoom, suppressing only six verified
+        // Preserve native permissions and zoom, suppressing only verified
         // yaw/pitch setter calls while this synchronous event drain is active.
         CustomizationGarageInput::Drain(garage,*reinterpret_cast<BYTE*>(0x926134),inputReady,
             SuppressNativeGarageRotation,[&]{reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);});
