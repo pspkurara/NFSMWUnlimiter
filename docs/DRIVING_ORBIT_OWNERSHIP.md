@@ -18,9 +18,14 @@ is still required. No sidecar schema or saved camera option changes.
 Garage zoom follow-up (2026-11-18): the rotation override disabled both native
 camera permission flags while draining HandleJoyEvents. PC 7A2380 gates rotation
 and mapped zoom (actions 2B/2C) together, so controller zoom was dropped while
-native mouse-wheel zoom, processed earlier, still worked. Six signature-checked
+native mouse-wheel zoom, processed earlier, still worked. Seven signature-checked
 rotation setter call sites now skip only rotation during that synchronous drain.
 Native zoom events and permissions survive; old native rotation fields are
 restored. Focus gaps still suppress all manual events. The callback fixture checks
 zoom preservation, rotation/permission restoration and focus gating. Native
 controller zoom and camera focus behavior still need runtime confirmation.
+Two zoom call sites additionally preserve automatic/cinematic modes for zero
+input: native SetZoomSpeed(0) also claims manual control. Actual nonzero zoom may
+claim that mode, and a subsequent zero release stops it normally. The final
+native horizontal-stop call is suppressed together with the six directional
+rotation/reset calls so an idle controller cannot claim a manual orbit.

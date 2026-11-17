@@ -2,6 +2,11 @@
 #include <cstdint>
 
 namespace CustomizationGarageInput {
+inline bool ForwardZoom(bool suppressed,int mode,float speed) {
+    // Native zero-speed setters also switch cinematic/automatic movers to
+    // manual. Releases only need forwarding once manual input actually owns it.
+    return !suppressed||mode==1||speed!=0.f;
+}
 // Drain native mapped events while suppressing only their competing rotation.
 // Native zoom remains live; only focus loss disables all manual camera events.
 template<class Word,class Invoke>

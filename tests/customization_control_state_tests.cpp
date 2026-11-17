@@ -9,6 +9,12 @@ using namespace CustomizationControls;
 void require(bool b,const char* text){if(!b)throw std::runtime_error(text);}
 int main(){try{
     {
+    for(int mode:{0,1,2,3}) {
+        require(CustomizationGarageInput::ForwardZoom(false,mode,0),"camera-off native zoom path stays untouched");
+        require(CustomizationGarageInput::ForwardZoom(true,mode,.5f),"actual zoom input may claim the native camera");
+        require(CustomizationGarageInput::ForwardZoom(true,mode,0)==(mode==1),
+            "neutral zoom cannot claim an automatic/cinematic camera but can stop a manual zoom");
+    }
     uint32_t garage[0x90/4]{};uint8_t showcase=1;bool suppressed=false;
     auto& rotate=*(reinterpret_cast<uint8_t*>(garage)+0x78);
     rotate=1;garage[0x7C/4]=12;garage[0x80/4]=34;
