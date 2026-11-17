@@ -19,6 +19,7 @@ SOURCES = [
     'tests/customization_controls_save_tests.cpp',
     'tests/customization_profile_host_tests.cpp',
     'tests/camera_runtime_fixture.cpp', 'tests/camera_runtime_peer_tests.cpp',
+    'tools/check_driver_preview_bridge.py',
 ]
 
 

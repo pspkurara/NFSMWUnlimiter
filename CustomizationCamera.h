@@ -291,7 +291,9 @@ namespace CustomizationCamera
             cmp byte ptr [DriverPreviewActive], 0
             je original
             and eax, 1
-            push 0x74EC5F
+            // Preview the enabled selected part even when the separate NIS
+            // driver visibility flag is off. No global flag is modified.
+            push 0x74EA1E
             ret
         original:
             push 0x74EC55
@@ -569,7 +571,10 @@ namespace CustomizationCamera
         else if (Config.garage || Config.driverPreview) Report("Garage camera signature mismatch; input hook not installed.");
 
         const unsigned char driver[] = {0x8B, 0x0D, 0x90, 0x5E, 0x92, 0, 0x83, 0xE0, 1, 0x83, 0xF9, 3, 0x75, 2, 0x33, 0xC0};
-        if (Config.driverPreview && Matches(0x74EC4F, driver))
+        const unsigned char driverFlags[]={0x83,0x3A,0x33,0x75,0x0B,0x23,0x05,0x20,0x09,0x9B,0,
+            0xE9,0xAF,0xFD,0xFF,0xFF,0x23,0x05,0x0C,0x33,0x90,0,0xE9,0xA4,0xFD,0xFF,0xFF};
+        const unsigned char driverDraw[]={0x85,0xC0,0x0F,0x84,0x7A,0x02,0,0};
+        if (Config.driverPreview && Matches(0x74EC4F, driver)&&Matches(0x74EC5F,driverFlags)&&Matches(0x74EA1E,driverDraw))
         {
             injector::MakeJMP(0x74EC4F, DriverVisibilityCave, true);
             injector::MakeNOP(0x74EC54, 1, true);
