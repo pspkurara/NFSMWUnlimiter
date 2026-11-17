@@ -232,7 +232,7 @@ static void Footer() {
     if(!package)return;
     // FindObjectByHash stops at the first match. Stock assets have several
     // HELP_BUTTON groups for different states; the first can be hidden.
-    CustomizationFrontendList::GroupsByName<DWORD> found(bStringHash("HELP_BUTTON"));
+    CustomizationFrontendList::GroupsByName<DWORD> found(bStringHash("HELP_BUTTON"),0x61D8F34F);
     reinterpret_cast<bool(__thiscall*)(DWORD*,CustomizationFrontendList::GroupsByName<DWORD>*)>(0x5B1560)(package,&found);
     for(auto group:found.groups) {
         if(group[0x60/4]>32)continue;
@@ -258,7 +258,10 @@ static void Footer() {
                 }
                 auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);
                 if(data&&labels[i][0x30/4]>=0x44) {
-                    float position[]={data[7]-(action?300.f:130.f),data[8],data[9]};
+                    // PC's expanded footer already has Accept/Cancel on this
+                    // row. Keep the extra actions on a separate line above it.
+                    const bool pc=group[0x10/4]!=bStringHash("HELP_BUTTON");
+                    float position[]={data[7]-(action?300.f:130.f),data[8]-(pc?26.f:0.f),data[9]};
                     reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(prompt,position,false);
                 }
                 SetText(prompt,action?"R3: Showcase":"X: Reset",false);
@@ -308,7 +311,7 @@ static void OpenShowcase() {
     ShowcaseAway=true;ShowcaseReturning=false;Closing=true;
     CustomizationSave::Log("Stance editor switching to native Showcase.");
     auto queue=reinterpret_cast<void(__thiscall*)(void*,const char*,unsigned,unsigned,bool)>(0x525940);
-    queue(*reinterpret_cast<void**>(0x91CADC),"Showcase.fng",0,0,false);
+    queue(*reinterpret_cast<void**>(0x91CADC),"Showcase.fng",*reinterpret_cast<unsigned*>(_FECarRecord),0,false);
 }
 static void __fastcall ShowcaseNotify(DWORD* screen,void*,unsigned message,void* object,unsigned p1,unsigned p2) {
     if(ShowcaseAway&&*reinterpret_cast<const char**>(0x905E34)==Package&&(message==Accept||message==Back)) {
@@ -423,6 +426,9 @@ static bool Commit() {
 }
 static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,unsigned p1,unsigned p2) {
     if(screen!=Screen){OriginalNotify(screen,message,object,p1,p2);return;}
+    // The independent screen receives the standard screen tick even when its
+    // package/camera state bypasses CarViewer's joystick-update call site.
+    if(message==0xC98356BA){Tick();return;}
     if(message==ExitComplete) {
         if(ShowcaseAway&&!ShowcaseReturning)return;
         if(!Finished)Cancel();

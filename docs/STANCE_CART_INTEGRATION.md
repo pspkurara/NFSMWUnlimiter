@@ -183,3 +183,21 @@ The body-shop entry uses the installed VISUAL_PART_RIMS texture. Its accept cue
 uses the native generic customization sound (50), as suspension/brake tuning
 does, through the tagged screen's sound callback. Other screens and dialogs keep
 the original callback. This optional sound hook does not gate the editor.
+
+Live original-installation inspection on 2026-11-18 found a visible PC Help
+group (D9E63061) outside the named HELP_BUTTON groups. Its FEString still read
+Help; the existing Copy/Reset/Showcase clones were in the hidden console/help
+states. Footer discovery now also matches direct strings with the native Help
+language hash 61D8F34F. Extra PC prompts use a separate row to avoid Accept/Cancel.
+The native traversal fixture covers this library-expanded, differently named
+group. Installation and visible confirmation of this correction remain pending.
+
+Space also failed to enter Showcase in the original session, despite an installed
+Showcase notification hook and available=true in memory. The independent screen
+now handles native SCREEN_TICK (C98356BA) itself, so input polling does not depend
+on CarViewer's conditional joystick-update call site. Showcase receives the
+active FECarRecord argument, as native customization does. Transition/return and
+preview retention still require runtime verification; this is not a confirmed fix.
+
+Deferred presentation request: keep the header to Stance | Both/Front/Rear,
+put units beside each channel, and add right-aligned limit labels on each row.

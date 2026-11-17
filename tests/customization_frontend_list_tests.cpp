@@ -22,13 +22,18 @@ static bool CheckDuplicateGroups() {
     std::memcpy(code,walk,sizeof(walk));DWORD previous=0;
     if(!VirtualProtect(code,sizeof(walk),PAGE_EXECUTE_READ,&previous)){VirtualFree(code,0,MEM_RELEASE);return false;}
     FlushInstructionCache(GetCurrentProcess(),code,sizeof(walk));
-    uint32_t package[21]{},groups[4][27]{};
+    uint32_t package[21]{},groups[4][27]{},label[26]{};
     package[0x4C/4]=reinterpret_cast<uint32_t>(groups[0]);
     for(auto& group:groups){group[0x18/4]=5;group[0x10/4]=0xDEADBEEF;}
     groups[0][1]=reinterpret_cast<uint32_t>(groups[1]);
     groups[1][1]=reinterpret_cast<uint32_t>(groups[2]);
     groups[1][0x10/4]=0;groups[1][0x64/4]=reinterpret_cast<uint32_t>(groups[3]);
-    CustomizationFrontendList::GroupsByName<uint32_t> found(0xDEADBEEF);
+    // Visible PC library prompt has a different group name; its localized Help
+    // string establishes its purpose without depending on that generated name.
+    groups[2][0x10/4]=0xD9E63061;groups[2][0x60/4]=1;
+    groups[2][0x64/4]=reinterpret_cast<uint32_t>(label);
+    label[0x18/4]=2;label[0x60/4]=0x61D8F34F;
+    CustomizationFrontendList::GroupsByName<uint32_t> found(0xDEADBEEF,0x61D8F34F);
     using Walk=bool(__thiscall*)(uint32_t*,decltype(found)*);
     const bool complete=reinterpret_cast<Walk>(static_cast<unsigned char*>(code)+0x50)(package,&found);
     VirtualFree(code,0,MEM_RELEASE);
