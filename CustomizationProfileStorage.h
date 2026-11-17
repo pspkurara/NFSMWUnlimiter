@@ -22,6 +22,9 @@ static uintptr_t GlobalAddress(uintptr_t address) {
 }
 static void Log(const char* message) noexcept {
     OutputDebugStringA("[MWCL Save] ");OutputDebugStringA(message);OutputDebugStringA("\n");
+#ifndef MWCL_SAVE_TEST_ADDRESS
+    // Isolated fixtures must not append simulated errors/events to the live
+    // game's diagnostics; that obscures real ownership and save-flow evidence.
     // Diagnostics must never interrupt a native save or leak a handle on allocation failure.
     try {
         wchar_t local[MAX_PATH]{};
@@ -37,6 +40,7 @@ static void Log(const char* message) noexcept {
         DWORD written=0;
         WriteFile(file,line.data(),DWORD(line.size()),&written,nullptr);CloseHandle(file);
     } catch(...) {}
+#endif
 }
 static bool ValidName(const std::string& name) {
     return !name.empty() && name.size()<32 && name!="." && name!=".." &&
