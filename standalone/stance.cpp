@@ -18,6 +18,20 @@ using SetupFn=int(__thiscall*)(DWORD*);
 using RandomFn=void(__thiscall*)(DWORD*);
 static SetupFn OriginalSetup=nullptr;
 static RandomFn OriginalRandom[2]{};
+using GarageFn=void(__thiscall*)(DWORD*);
+static GarageFn OriginalGarage=nullptr;
+static void __fastcall Garage(DWORD* garage,void*) {
+    if(auto update=CustomizationCamera::GarageUpdateObserver.load())update();
+    OriginalGarage(garage);
+}
+static bool InstallGarageTick() {
+    constexpr uintptr_t address=0x7A2310;
+    const BYTE bytes[]={0xA1,0x90,0xCF,0x91,0,0x83,0xEC,0x0C};
+    if(std::memcmp(reinterpret_cast<const void*>(address),bytes,sizeof(bytes))||
+       MH_CreateHook(reinterpret_cast<void*>(address),&Garage,reinterpret_cast<void**>(&OriginalGarage))!=MH_OK)return false;
+    if(MH_EnableHook(reinterpret_cast<void*>(address))==MH_OK)return true;
+    MH_RemoveHook(reinterpret_cast<void*>(address));OriginalGarage=nullptr;return false;
+}
 
 static uintptr_t OwnedTarget(uintptr_t site,BYTE opcode) {
     return CustomizationHookChain::OwnedTarget(site,opcode,Unlimiter);
@@ -56,7 +70,9 @@ static bool Chain() {
     const auto setup=OwnedTarget(0x7BFBD0,0xE9),name=OwnedTarget(0x7BB17B,0xE8);
     if(!setup||!name)return false;
     if(MH_CreateHook(reinterpret_cast<void*>(0x7BFBD0),&Setup,reinterpret_cast<void**>(&OriginalSetup))!=MH_OK)return false;
-    if(!CustomizationStanceMenu::Install(name)||MH_EnableHook(reinterpret_cast<void*>(0x7BFBD0))!=MH_OK) {
+    // Stance owns a frame callback, not the optional camera feature. The native
+    // Showcase screen remains available without installing garage/race overrides.
+    if(!CustomizationStanceMenu::Install(name,false)||MH_EnableHook(reinterpret_cast<void*>(0x7BFBD0))!=MH_OK) {
         MH_RemoveHook(reinterpret_cast<void*>(0x7BFBD0));return false;
     }
     const uintptr_t sites[]={0x5E8FE0,0x7B4907};
@@ -79,9 +95,12 @@ static DWORD WINAPI Initialize(void*) {
         CustomizationSave::Log("Standalone stance host: integrated fork detected; not installing duplicate features.");return 0;
     }
     if(!CustomizationBridge::Install()||!CustomizationSave::Install())return 0;
-    const bool lifecycle=CustomizationProfileHost::Install();
-    CustomizationControls::Install(lifecycle);
-    CustomizationCamera::Install();
+    HMODULE xinput=LoadLibraryExW(L"xinput1_4.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if(!xinput)xinput=LoadLibraryExW(L"xinput9_1_0.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if(xinput)CustomizationCamera::GetPadState=reinterpret_cast<decltype(CustomizationCamera::GetPadState)>(GetProcAddress(xinput,"XInputGetState"));
+    if(!InstallGarageTick()) {
+        CustomizationSave::Log("Standalone stance menu disabled: native garage frame boundary unavailable.");return 0;
+    }
     CustomizationSave::Log(Chain()?"Standalone stance host installed beside unchanged Unlimiter.":
         "Standalone stance menu chain unavailable; native shop retained.");
     return 0;

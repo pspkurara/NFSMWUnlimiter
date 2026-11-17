@@ -595,7 +595,7 @@ void AddPartsOption(DWORD* screen) {
     const int count=bList_TraversebList(reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(screen)+0x30),nullptr);
     ReturnIndex=count>0&&count<=255?unsigned(count):1;
 }
-static bool Install(uintptr_t compatibleCartName=0) {
+static bool Install(uintptr_t compatibleCartName=0,bool orbitView=true) {
     if(Installed)return true;
     CustomizationCamera::Settings menuSettings;
     NormalStep=CustomizationCamera::Number(menuSettings,"StanceMenu","StepMultiplier",5,.01f,1000);
@@ -639,7 +639,7 @@ static bool Install(uintptr_t compatibleCartName=0) {
         CustomizationSave::Log("Native stance menu disabled: garage update owner unavailable.");return false;
     }
     Installed=true;
-    InstallGarageView();
+    if(orbitView)InstallGarageView();
     InstallShowcase();
     InstallFeedback();
     CustomizationSave::Log("Native body-shop stance menu installed (free grouped adjustment).");return true;

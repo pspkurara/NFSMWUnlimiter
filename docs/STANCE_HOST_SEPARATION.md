@@ -46,9 +46,11 @@ family and rejects the integrated fork to avoid duplicate hooks. It is excluded
 from installation snapshots. An actual x86 E9 entry chained through MinHook now
 passes owner, ECX, original-before-extension, return-value and restoration checks.
 Separate ASI camera/runtime fixtures pass both stance-host/camera load orders.
-Actual dependency startup and game runtime QA are still pending. Its shared
-camera/frame support also needs isolation review before
-calling this a standalone stance product. A successful compile is not release
+Actual dependency startup and game runtime QA are still pending. The host now
+uses a minimal native garage update hook and an XInput reader for stance controls;
+it does not initialize the optional driving camera or camera Controls editor.
+Its editor also leaves garage camera metadata native. Camera behavior remains
+the responsibility of the separately installed camera plugin. A successful compile is not release
 evidence or proof of compatibility with newer layout families.
 
 Runtime follow-ups reported during integration QA: the initial My Cars viewer
