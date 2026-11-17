@@ -23,3 +23,19 @@ This narrows concrete stale-input/ownership paths. It does not prove that a
 native mouse delta, camera transition animation or another mod cannot produce
 the remaining symptom. The exact reported focus/Showcase/back sequence still
 requires live verification; build and existing regression tests are indirect.
+
+The 2026-11-18 reproduction was captured from original PID 96012 in Showcase.
+The native SelectCar mover was manual, with vertical speed -557418 and horizontal
+speed -175106, while the mouse delta globals were already zero. This is concrete
+residual velocity, not a slow angle interpolation. The VRM hooks on the native
+speed setters record nonzero-input timestamps and forward the unmodified speed;
+their presence does not establish that VRM generated these values.
+
+Two gaps in this adapter were identified: paused frontend updates could miss
+focus loss entirely, and handing input to native mouse cleared the ownership
+needed to stop it after button release. A bounded frame/mover continuity check
+now discards input after a gap or replacement, and native mouse interaction keeps
+a stop lease until release. Stopping also clears the garage's cached rotation
+values. Native cinematic/automatic modes remain outside that stop operation.
+The original large mouse packet's producer is still unproven. Repeating the
+reported minimize/return/release sequence is required before claiming resolution.

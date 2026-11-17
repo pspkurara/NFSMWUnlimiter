@@ -9,6 +9,12 @@ using namespace CustomizationControls;
 void require(bool b,const char* text){if(!b)throw std::runtime_error(text);}
 int main(){try{
     {
+    CustomizationGarageInput::FocusBoundary focus;
+    require(!focus.Observe(true,100,1)&&focus.Observe(true,116,1),"first garage frame waits for fresh input");
+    require(!focus.Observe(true,1116,1),"paused frontend detects focus boundary without a background update");
+    require(focus.Observe(true,1132,1),"next timely foreground frame accepts input");
+    require(!focus.Observe(false,1148,1)&&!focus.Observe(true,1164,1),"observed focus loss discards first returning input");
+    require(!focus.Observe(true,1180,2),"replacement mover cannot inherit stale input");
     for(int mode:{0,1,2,3}) {
         require(CustomizationGarageInput::ForwardZoom(false,mode,0),"camera-off native zoom path stays untouched");
         require(CustomizationGarageInput::ForwardZoom(true,mode,.5f),"actual zoom input may claim the native camera");

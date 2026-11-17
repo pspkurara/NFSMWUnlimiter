@@ -39,7 +39,7 @@ namespace CustomizationCamera
     static bool DriverPreviewActive = false;
     static bool GarageControlled = false;
     static void* ControlledGarageMover=nullptr;
-    static bool GarageHadFocus=true;
+    static CustomizationGarageInput::FocusBoundary GarageFocus;
     static bool Installed = false;
     static bool NativeLookBackVerified = false;
     static bool NativeViewVerified = false;
@@ -237,12 +237,13 @@ namespace CustomizationCamera
             *reinterpret_cast<int*>(static_cast<BYTE*>(mover)+0x80)==1) {
             reinterpret_cast<void(__thiscall*)(void*,float)>(0x476E70)(mover,0);
             reinterpret_cast<void(__thiscall*)(void*,float)>(0x476F30)(mover,0);
+            garage[0x7C/4]=garage[0x80/4]=0;
         }
         GarageControlled=false;ControlledGarageMover=nullptr;
     }
     static void ApplyGarageInput(DWORD* garage,float x,float y,bool nativeMouse) {
         if(x==0&&y==0) {
-            if(nativeMouse){GarageControlled=false;ControlledGarageMover=nullptr;}
+            if(nativeMouse){GarageControlled=true;ControlledGarageMover=GarageMover(garage);}
             else StopGarageSpeeds(garage);
             return;
         }
@@ -286,8 +287,7 @@ namespace CustomizationCamera
         bool reset = false;
         const bool nativePermission=*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134);
         const bool foreground=Foreground();
-        const bool inputReady=foreground&&GarageHadFocus;
-        GarageHadFocus=foreground;
+        const bool inputReady=GarageFocus.Observe(foreground,GetTickCount64(),reinterpret_cast<uintptr_t>(GarageMover(garage)));
         const bool nativeMouse=inputReady&&NativeMouseVerified&&nativePermission&&*reinterpret_cast<const BYTE*>(0x987F70);
         const bool screenAllows=PartsScreen?PartsScreen[0x148/4]!=0x307:
             !Config.partsOnly&&(*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134));
@@ -314,12 +314,13 @@ namespace CustomizationCamera
             if(mover&&*reinterpret_cast<int*>(static_cast<BYTE*>(mover)+0x80)==1) {
                 reinterpret_cast<void(__thiscall*)(void*,float)>(0x476E70)(mover,0);
                 reinterpret_cast<void(__thiscall*)(void*,float)>(0x476F30)(mover,0);
+                garage[0x7C/4]=garage[0x80/4]=0;
             }
             GarageControlled=false;ControlledGarageMover=nullptr;return;
         }
         if(!ReadStick(x,y,reset)) {
             if(!nativeMouse)StopGarageSpeeds(garage);
-            else {GarageControlled=false;ControlledGarageMover=nullptr;}
+            else {GarageControlled=true;ControlledGarageMover=GarageMover(garage);}
             return;
         }
         // Native mouse handling runs before this joy call and already set speeds.
