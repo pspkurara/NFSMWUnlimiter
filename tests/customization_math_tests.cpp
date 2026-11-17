@@ -1,6 +1,7 @@
 #include "../CustomizationMath.h"
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 using namespace CustomizationMath;
 void near(float a,float b) { if(std::fabs(a-b)>0.0001f) { std::fprintf(stderr,"%f != %f\n",a,b);std::exit(1); } }
 int main() {
@@ -48,6 +49,18 @@ int main() {
     const auto landed=MoveBodyPart(root,root,HeightTransform(1.5f,-1.5f,-.6f,-.6f));
     const auto lowered=Multiply(HeightTransform(1.5f,-1.5f,-.6f,-.6f),root);
     for(int i=0;i<4;++i)for(int j=0;j<4;++j)near(landed.m[i][j],lowered.m[i][j]);
+    // Height must preserve ordinary and already-reflected native bases.
+    auto determinant=[](const Matrix& m) {
+        return m.m[0][0]*(m.m[1][1]*m.m[2][2]-m.m[1][2]*m.m[2][1])-
+            m.m[0][1]*(m.m[1][0]*m.m[2][2]-m.m[1][2]*m.m[2][0])+
+            m.m[0][2]*(m.m[1][0]*m.m[2][1]-m.m[1][1]*m.m[2][0]);
+    };
+    for(float reflection:{1.f,-1.f})for(float height:{-.75f,0.f,.75f}) {
+        auto nativeRoot=Identity();nativeRoot.m[2][2]=reflection;nativeRoot.m[3][2]=2;
+        const auto changed=MoveBodyPart(nativeRoot,nativeRoot,HeightTransform(1.5f,-1.5f,height,height));
+        near(determinant(changed),reflection);
+        for(int i=0;i<3;++i)for(int j=0;j<3;++j)near(changed.m[i][j],nativeRoot.m[i][j]);
+    }
     root.m[0][0]=NAN;if(AffineInverse(root,inverse))return 3;
     root=Identity();root.m[2][2]=1e-12f;if(AffineInverse(root,inverse))return 4;
     root=Identity();root.m[1][3]=.1f;if(AffineInverse(root,inverse))return 5;
