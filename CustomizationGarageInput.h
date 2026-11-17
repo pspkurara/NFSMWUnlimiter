@@ -2,6 +2,15 @@
 #include <cstdint>
 
 namespace CustomizationGarageInput {
+struct FocusBoundary {
+    uint64_t last=0;uintptr_t mover=0;bool focused=false;
+    bool Observe(bool foreground,uint64_t now,uintptr_t currentMover) {
+        // A minimized game can stop frontend updates entirely. In that case no
+        // background frame ever observes focus loss; a time gap is a boundary too.
+        const bool ready=foreground&&focused&&last&&now>=last&&now-last<=250&&mover==currentMover;
+        focused=foreground;last=now;mover=currentMover;return ready;
+    }
+};
 inline bool ForwardZoom(bool suppressed,int mode,float speed) {
     // Native zero-speed setters also switch cinematic/automatic movers to
     // manual. Releases only need forwarding once manual input actually owns it.
