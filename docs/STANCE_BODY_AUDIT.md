@@ -67,3 +67,25 @@ Fiat asset metadata, but the native simple-animation caller uses that matrix onl
 for two scenery hashes, neither matching Fiat. Live hash-table reads confirmed
 the default targets. See [pivot-use evidence](STANCE_GEOMETRY_RESEARCH.md#pc-pivot-use-follow-up).
 An unconditional vehicle axis correction is therefore unsupported by this lead.
+
+## First live Fiat trace, 2026-11-17
+
+The private validation installation running source 5b5f760 recorded 48 distinct
+FIATCOUPE pass/height combinations, with equal axle heights approximately -0.025
+through -0.325. There were 32 nonreflection and 16 floor-reflection snapshots.
+`tools/analyze_body_trace.py <bridge.log> --output <report.json>` checked all
+192 recorded part input/output pairs. Each output matched input multiplied by
+the recorded world-height delta within 2e-5, and every determinant retained its
+sign. Native nonreflection passes had positive orientation; negative native
+orientation was confined to reflection passes in this recording. The normal
+part translations changed with the requested height, rather than remaining at
+the original height or becoming reflected inside this bridge.
+
+This rules out a newly introduced reflection in those sampled bridge outputs;
+it does not identify the visible upside-down object, prove complete mesh/part
+coverage, or exclude later renderer/other-plugin changes. Do not describe the
+reported symptom as fixed without visual confirmation. Raw process addresses
+and the private game's log are retained outside the repository. Four parser
+fixtures cover preserved native reflections, an incorrect translation, process
+ID-counter restarts and missing world-transform evidence:
+`python -m unittest discover -s tests -p body_trace_tests.py`.
