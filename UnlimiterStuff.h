@@ -34,6 +34,7 @@ bool ManuHook, ExtraCustomization, DisappearingWheelsFix, SecondaryLogoFix, Expa
 #include "Helpers.h"
 #include "CodeCaves.h"
 #include "CustomizationSave.h"
+#include "CustomizationStanceCart.h"
 #include "CustomizationRandom.h"
 #include "CustomizationControls.h"
 #include "CustomizationBridge.h"

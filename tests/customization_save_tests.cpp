@@ -3,12 +3,62 @@ static uintptr_t fixtureBase;
 static uintptr_t FixtureAddress(uintptr_t original) {return fixtureBase+original-0x800000;}
 #define MWCL_SAVE_TEST_ADDRESS(original) FixtureAddress(original)
 #include "../CustomizationSave.h"
+#include "../includes/injector/injector.hpp"
+static uintptr_t FixtureCartAddress(uintptr_t original);
+#define MWCL_CART_TEST_ADDRESS(original) FixtureCartAddress(original)
+static void __fastcall FEShoppingCartItem_DrawPartName(DWORD*) {}
+#include "../CustomizationStanceCart.h"
 #include <iostream>
 #include <cstdlib>
 namespace fs=std::filesystem;
 using namespace CustomizationSave;
 static fs::path directory;
 static void Check(bool ok,const char* message) {if(!ok){std::cerr<<message<<'\n';std::exit(1);}}
+static DWORD cartManager[0x1C4/4]{};
+static int cartAllocations=0,nativeCheckouts=0,previewParts=0,nativePartInstalls=0;
+static bool failCartCommit=false,inBackroom=false;
+static void* __cdecl CartAllocate(int size){++cartAllocations;return std::calloc(1,size);}
+static void __cdecl CartFree(void* pointer){if(pointer){--cartAllocations;std::free(pointer);}}
+static bool __cdecl CartBackroom(){return inBackroom;}
+static DWORD* __fastcall CartPart(DWORD* self,void*,void* part,int slot,unsigned level,int physics,bool performance,int state,int price,bool junkman) {
+    self[0]=0x8B7518;self[3]=reinterpret_cast<DWORD>(part);self[4]=slot;self[5]=level;self[6]=physics;
+    reinterpret_cast<BYTE*>(self)[0x1C]=performance;self[8]=state;self[9]=price;reinterpret_cast<BYTE*>(self)[0x28]=junkman;return self;
+}
+static DWORD* __fastcall CartItem(DWORD* self,void*,DWORD* part,void* trade) {
+    self[0]=0x8B751C;self[3]=reinterpret_cast<DWORD>(part);self[4]=reinterpret_cast<DWORD>(trade);
+    reinterpret_cast<BYTE*>(self)[0x14]=1;return self;
+}
+static void* __fastcall CartDelete(DWORD* self,void*,unsigned) {CartFree(reinterpret_cast<void*>(self[3]));CartFree(self);return self;}
+static bool __fastcall CartRemove(DWORD*,void*,DWORD* item) {
+    CustomizationStanceCart::Detach(item);CustomizationStanceCart::Delete(item,nullptr,1);return true;
+}
+static void __fastcall CartCheckout(DWORD* manager,void*) {
+    ++nativeCheckouts;auto sentinel=manager+0x1B4/4;
+    while(sentinel[0]!=reinterpret_cast<DWORD>(sentinel)) {
+        auto item=reinterpret_cast<DWORD*>(sentinel[0])-1;
+        Check(reinterpret_cast<DWORD*>(item[3])[4]!=0x8F1||!reinterpret_cast<BYTE*>(item)[0x14],
+              "Synthetic stance slot must never reach active native checkout");
+        if(reinterpret_cast<BYTE*>(item)[0x14])++nativePartInstalls;
+        CartRemove(manager,nullptr,item);
+    }
+}
+static void __fastcall CartPreviewPart(DWORD*,void*,int,void*){++previewParts;}
+static void __fastcall CartSetupNative(DWORD*,void*) {
+    Check(!inBackroom||!CustomizationStanceCart::Item,"Backroom marker setup cannot see synthetic item");
+}
+static int __cdecl CartControl(uint64_t,int operation,int){return operation==1&&failCartCommit?0:1;}
+static uintptr_t FixtureCartAddress(uintptr_t original) {
+    switch(original) {
+    case 0x9B9EC0:return reinterpret_cast<uintptr_t>(cartManager);
+    case 0x652AD0:return reinterpret_cast<uintptr_t>(&CartAllocate);
+    case 0x652B00:return reinterpret_cast<uintptr_t>(&CartFree);
+    case 0x575B00:return reinterpret_cast<uintptr_t>(&CartBackroom);
+    case 0x7A9EA0:return reinterpret_cast<uintptr_t>(&CartPart);
+    case 0x7A9F20:return reinterpret_cast<uintptr_t>(&CartItem);
+    case 0x7AEB60:return reinterpret_cast<uintptr_t>(&CartRemove);
+    default:return original;
+    }
+}
 static HRESULT WINAPI Folder(HWND,int,HANDLE,DWORD,char* path) {
     strcpy_s(path,MAX_PATH,directory.string().c_str());return S_OK;
 }
@@ -91,6 +141,54 @@ int main() {
     Check(!EndShopCheckout(9,true)&&!EndShopCheckout(9,false),"Stale checkout cannot finalize");
     Check(NativeMenuOwner(menuOwner,menuValues)&&menuValues.values[4]==-6.f,"Purchased values survive reopen");
     Shop.Clear();Check(Edit(9,&value,1)==1,"Restore fixture purchased baseline");
+    namespace cart=CustomizationStanceCart;
+    auto cartSentinel=cartManager+0x1B4/4;
+    cartSentinel[0]=cartSentinel[1]=reinterpret_cast<DWORD>(cartSentinel);
+    cart::Installed=true;cart::CoreControl=&CartControl;
+    cart::OriginalDelete=reinterpret_cast<cart::DeleteFn>(&CartDelete);
+    cart::OriginalCheckout=reinterpret_cast<cart::CheckoutFn>(&CartCheckout);
+    cart::OriginalPreviewPart=reinterpret_cast<cart::PreviewPartFn>(&CartPreviewPart);
+    cart::OriginalCartSetup=reinterpret_cast<cart::CheckoutFn>(&CartSetupNative);
+    Check(BeginShop(9,true)&&PreviewShop(9,cartValue,true)&&cart::Accept(9),"Native adapter inserts stance item");
+    Check(cartAllocations==2&&cartManager[0x1BC/4]==1&&cartSentinel[0]==reinterpret_cast<DWORD>(cart::Item+1),
+          "Native item/part allocations and list ownership agree");
+    Check(Pending.at(key).values[4]==-2.5f&&Resolve(ride.data(),0,2,0)==-6.f,"Native cart insertion only previews");
+    cart::PreviewPart(cartManager,nullptr,0x8F1,nullptr);
+    cart::PreviewPart(cartManager,nullptr,23,reinterpret_cast<void*>(1));
+    Check(previewParts==1,"Native preview rebuild skips only the synthetic stance slot");
+    Check(BeginShop(9,true)&&PreviewShop(9,previewValue,true)&&cart::Accept(9),"Replace native stance cart entry");
+    Check(cartAllocations==2&&cartManager[0x1BC/4]==1&&Resolve(ride.data(),0,2,0)==-4.f,
+          "Replacement deletes old allocations without removing new snapshot");
+    failCartCommit=true;cart::Checkout(cartManager,nullptr);
+    Check(nativeCheckouts==0&&cart::Item&&cartManager[0x1BC/4]==1&&Pending.at(key).values[4]==-2.5f,
+          "Settings save failure leaves cart and native purchase untouched");
+    failCartCommit=false;
+    reinterpret_cast<BYTE*>(cart::Item)[0x14]=0;cart::Tick();
+    Check(Resolve(ride.data(),0,2,0)==-2.5f,"Unchecked item restores purchased rendering");
+    cart::Checkout(cartManager,nullptr);
+    Check(!cart::Item&&cartAllocations==0&&cartManager[0x1BC/4]==0&&Pending.at(key).values[4]==-2.5f,
+          "Unchecked item is discarded by native cleanup without purchase");
+    Check(BeginShop(9,true)&&PreviewShop(9,cartValue,true)&&cart::Accept(9),"Queue native purchase case");
+    cart::Checkout(cartManager,nullptr);
+    Check(!cart::Item&&cartAllocations==0&&cartManager[0x1BC/4]==0&&Pending.at(key).values[4]==-6.f,
+          "Native checkout detaches synthetic slot, promotes absolute values and frees allocations once");
+    Check(BeginShop(9,true)&&PreviewShop(9,cartValue,true)&&cart::Accept(9),"Queue stance in mixed native cart");
+    auto ordinaryPart=reinterpret_cast<DWORD*>(CartAllocate(0x2C));
+    CartPart(ordinaryPart,nullptr,nullptr,23,0,7,false,0,0,false);
+    auto ordinaryItem=reinterpret_cast<DWORD*>(CartAllocate(0x18));CartItem(ordinaryItem,nullptr,ordinaryPart,nullptr);
+    auto ordinaryNode=ordinaryItem+1,tail=reinterpret_cast<DWORD*>(cartSentinel[1]);
+    tail[0]=reinterpret_cast<DWORD>(ordinaryNode);cartSentinel[1]=reinterpret_cast<DWORD>(ordinaryNode);
+    ordinaryNode[0]=reinterpret_cast<DWORD>(cartSentinel);ordinaryNode[1]=reinterpret_cast<DWORD>(tail);
+    ++cartManager[0x1BC/4];
+    const auto installsBefore=nativePartInstalls;
+    cart::Checkout(cartManager,nullptr);
+    Check(nativePartInstalls==installsBefore+1&&cartAllocations==0&&cartSentinel[0]==reinterpret_cast<DWORD>(cartSentinel),
+          "Mixed checkout preserves native item processing and empties links without synthetic installation");
+    Check(BeginShop(9,true)&&PreviewShop(9,previewValue,true)&&cart::Accept(9),"Queue item before backroom transition");
+    inBackroom=true;cart::CartSetup(cartManager,nullptr);inBackroom=false;
+    Check(!cart::Item&&cartAllocations==0&&Pending.at(key).values[4]==-6.f,
+          "Backroom transition discards unpurchased stance without touching installed values");
+    Shop.Clear();Check(Edit(9,&value,1)==1,"Restore purchased baseline after native adapter tests");
     *reinterpret_cast<int*>(FixtureAddress(0x925e90))=6;
     auto ai=ride;Check(Resolve(ai.data(),0,2,0)==0,"Unknown identical AI remains native");
     Check(TrackRideCopy(ride.data(),ai.data())&&Resolve(ai.data(),0,2,0)==-2.5f,

@@ -8,7 +8,7 @@ namespace CustomizationStance {
 class Shop {
 public:
     struct Snapshot { Values values{}; bool enabled=false; };
-    struct Item { uint64_t revision=0; Snapshot snapshot{}; };
+    struct Item { uint64_t revision=0; Snapshot snapshot{}; bool active=true; };
 
     bool Enter(uint64_t owner,const Snapshot& purchased) {
         if(!owner||!Valid(purchased))return false;
@@ -22,10 +22,16 @@ public:
         return cart_?&cart_->snapshot:&purchased_;
     }
     const Snapshot* Visible(uint64_t owner) const {
-        return Owns(owner)&&preview_?&*preview_:Initial(owner);
+        if(!Owns(owner))return nullptr;
+        if(preview_)return &*preview_;
+        return cart_&&cart_->active?&cart_->snapshot:&purchased_;
     }
     const Item* Cart(uint64_t owner) const {return Owns(owner)&&cart_?&*cart_:nullptr;}
     bool CheckingOut(uint64_t owner) const {return Owns(owner)&&checkout_.has_value();}
+    bool SetActive(uint64_t owner,uint64_t revision,bool active) {
+        if(!Owns(owner)||!cart_||cart_->revision!=revision||checkout_)return false;
+        cart_->active=active;return true;
+    }
     bool Begin(uint64_t owner) {
         const auto initial=Initial(owner);if(!initial||editing_||checkout_)return false;
         preview_=*initial;editing_=true;return true;
@@ -51,7 +57,7 @@ public:
         cart_.reset();return true;
     }
     bool BeginCheckout(uint64_t owner,uint64_t revision) {
-        if(!Owns(owner)||!cart_||cart_->revision!=revision||editing_||checkout_)return false;
+        if(!Owns(owner)||!cart_||!cart_->active||cart_->revision!=revision||editing_||checkout_)return false;
         checkout_=*cart_;return true;
     }
     // A false result leaves the exact item queued. A true result returns the

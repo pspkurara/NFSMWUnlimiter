@@ -87,11 +87,11 @@ static float StepMultiplier() {
     return fine?FineStep:fast?FastStep:NormalStep;
 }
 static bool Core() {
-    if(Begin&&Control)return true;
+    if(Begin&&Control)return CustomizationStanceCart::Core();
     auto module=GetModuleHandleA("NFSMWCustomizationLab.asi");if(!module)return false;
     Begin=reinterpret_cast<BeginFn>(GetProcAddress(module,"MWCL_BeginNativeMenuV1"));
     Control=reinterpret_cast<ControlFn>(GetProcAddress(module,"MWCL_ControlNativeMenuV1"));
-    return Begin&&Control;
+    return Begin&&Control&&CustomizationStanceCart::Core();
 }
 static bool Asset() {
     auto manager=*reinterpret_cast<void**>(0x91D21C);if(!manager)return false;
@@ -126,6 +126,7 @@ static int Host(const Values* values,int action) {
     return CustomizationSave::Edit(Owner,reinterpret_cast<const CustomizationSave::Values*>(values),action);
 }
 static void Cancel() {
+    if(Owner&&!Finished)CustomizationSave::CancelShop(Owner);
     if(Owner&&!Finished)Host(nullptr,2);
     if(Control&&EditSession.info.token)Control(EditSession.info.token,2,0);
     Finished=true;
@@ -136,6 +137,7 @@ static void Leave() {
     cFEng_QueuePackageMessage(*reinterpret_cast<void**>(0x91CADC),0x587C018B,Package,0);
 }
 static void Tick() {
+    CustomizationStanceCart::Tick();
     if(Opening&&!Screen&&GetTickCount64()-OpenedAt>30000) {
         Cancel();Opening=false;CustomizationSave::Log("Stance menu open timed out; lease released.");
     }
@@ -165,7 +167,7 @@ static void Heading(const char* error=nullptr) {
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
     Text(0x2FBBF8E8,"Copy");Text(0x55FA05C3,"Copy");
-    Text(0x05CDDED4,"LT/RT: axle   X: inherit   Shift: fine   Ctrl: fast");
+    Text(0x05CDDED4,"A: add to cart   LT/RT: axle   X: inherit   Shift: fine   Ctrl: fast");
 }
 static void __fastcall Draw(DWORD* slider,void*) {
     const int index=SliderIndex(slider);
@@ -207,7 +209,8 @@ static void Refresh() {
     Heading();
 }
 static bool Preview() {
-    if(!Current()||!Control(EditSession.info.token,0,EditSession.enabled)||!Host(&EditSession.active,0)) {
+    if(!Current()||!Control(EditSession.info.token,0,EditSession.enabled)||
+       !CustomizationSave::PreviewShop(Owner,EditSession.active,EditSession.enabled)) {
         Cancel();Leave();return false;
     }
     return true;
@@ -229,11 +232,9 @@ static void __fastcall Act(DWORD* slider,void*,const char* package,unsigned mess
 static bool Commit() {
     if(!Current())return false;
     if(!EditSession.Dirty()){Cancel();return true;}
-    if(!Host(&EditSession.active,1))return false;
-    if(!Control(EditSession.info.token,1,EditSession.enabled)) {
-        // The INI writer failed: restore the previous staged values and keep previewing.
-        Host(&EditSession.before,1);Host(&EditSession.active,0);return false;
-    }
+    if(!CustomizationStanceCart::Accept(Owner))return false;
+    // Release the editor lease; neither values nor Enabled are purchased here.
+    Control(EditSession.info.token,2,0);
     Finished=true;return true;
 }
 static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,unsigned p1,unsigned p2) {
@@ -248,7 +249,7 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     if(!Current()){Cancel();Leave();return;}
     if(message==Back){Cancel();Leave();return;}
     if(message==Accept) {
-        if(Commit())Leave();else Heading("Unable to apply. Check active car/profile and writable settings.");
+        if(Commit())Leave();else Heading("Unable to queue stance. Use a normal shop with an active owned car.");
         return;
     }
     if(message==PreviousAxle||message==NextAxle) {
@@ -327,8 +328,9 @@ static void __fastcall React(DWORD* option,void*,const char* parent,unsigned mes
     if(!CustomizationSave::NativeMenuOwner(owner,values))return;
     MenuInfo info;
     if(!Begin(owner,&info))return;
+    if(!CustomizationSave::BeginShop(owner,info.enabled!=0)){Control(info.token,2,0);return;}
     Values initial;std::memcpy(&initial,&values,sizeof(initial));
-    if(!EditSession.Begin(info,initial)){Control(info.token,2,0);return;}
+    if(!EditSession.Begin(info,initial)){CustomizationSave::CancelShop(owner);Control(info.token,2,0);return;}
     Owner=owner;Finished=false;Closing=false;Opening=true;OpenedAt=GetTickCount64();
     OpeningArgs=option[0x50/4];Parent=parent?parent:"";
     ReturnArgs=(OpeningArgs>>16)|(ReturnIndex<<16);
@@ -360,6 +362,8 @@ static void __declspec(naked) Dispatch() {
 }
 void AddPartsOption(DWORD* screen) {
     if(!Installed||!CustomizationSave::HooksReady||!Core()||!Asset())return;
+    if(reinterpret_cast<bool(__cdecl*)()>(0x575B00)())return;
+    if(reinterpret_cast<bool(__cdecl*)()>(0x575B00)())return;
     // The native-save implementation currently supports owned career/My Cars records.
     auto record=*reinterpret_cast<DWORD**>(_FECarRecord);CustomizationSave::Key key;
     {
@@ -405,6 +409,9 @@ static bool Install() {
     if(std::memcmp(reinterpret_cast<void*>(0x585AA0),"\x57\x8B\x7C\x24\x08\x8B\x07",7)||
        std::memcmp(reinterpret_cast<void*>(0x585820),"\x53\x56\x8B\x74\x24\x0C",6))return false;
     const auto status=MH_Initialize();if(status!=MH_OK&&status!=MH_ERROR_ALREADY_INITIALIZED)return false;
+    if(!CustomizationStanceCart::Install()) {
+        CustomizationSave::Log("Native stance menu disabled: cart ownership hooks unavailable.");return false;
+    }
     NameHash=bStringHash("MWCL_STANCE_ADJUSTMENT");PackageHash=0xFFFFFFFF;
     for(const unsigned char* c=reinterpret_cast<const unsigned char*>(Package);*c;++c)PackageHash=PackageHash*33+std::toupper(*c);
     size_t created=0;bool ok=true;

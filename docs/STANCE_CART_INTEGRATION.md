@@ -72,15 +72,14 @@ path without handling it explicitly. UI descriptions, activity, totals, removal,
 marker/backroom handling and checkout all need a coherent tagged-item adapter.
 Do not assume that overriding InstallPart alone protects the direct record call.
 
-## Next implementation and checks
+## Implementation and remaining live checks
 
 CustomizationStanceShop.h now implements the platform-independent state machine
 with owner-bound absolute snapshots, separate purchased/cart/editor layers,
 revision-tagged replacement/removal and a frozen checkout snapshot. Tests cover
 reopen/replace/cancel/remove/buy, failed buy, owner changes, repeated checkout,
 invalid input, purchased-state exclusion and eight accept/reopen adjustments
-that must stop at the same absolute lower bound. This code is not yet connected
-to the running adapter and does not itself fix the live shop.
+that must stop at the same absolute lower bound.
 
 The owned-car host now owns this Shop instance. BeginShop/PreviewShop/CancelShop/
 AcceptShop/RemoveShop and the two checkout callbacks validate the current token
@@ -90,18 +89,35 @@ uses purchased values only. Profile load, native memory restore and native car
 record reuse clear transient shop state. The production save fixture exercises
 these paths and proves native save snapshots exclude cart values, including
 reopening a queued item and cancelling its later edit. All 12 root tests pass.
-The UI does not call these new entry points until the native cart adapter is
-complete: accepting the currently installed screen remains the known defect.
+CustomizationStanceCart.h connects the native menu to one zero-cost tagged
+ShoppingCartItem allocated with native part/item constructors. Accept queues it,
+replacing an earlier stance entry. Native row formatting supplies its name and
+retains price/check widgets. Native deletion discards its preview. Checkout
+freezes its revision, detaches only that node before the native installer runs,
+then promotes the absolute values and destroys the detached item once. A guard
+also skips the synthetic slot during native ResetPreview's PreviewPart calls.
+Ordinary items retain their native checkout path. Existing ExtraOptions/VRM
+renderer hooks are not replaced by this adapter.
 
-Connect it to a guarded PC
-adapter using a tagged native cart item, retaining native allocation/destruction
-and list ownership. Check the actual native UI row formatting before introducing
-a synthetic part. The adapter must handle native install bypass and labels for
-its tagged entry while all ordinary items retain their existing code paths.
+The companion's optional MWCL_ControlNativeCartV1 keeps Enabled transient while
+queued, preserves it when reopening/cancelling an editor and writes its user
+INI only at checkout. The host smoke tests load the actual ASI and compare INI
+contents before/after staging/cancelling. Native adapter fixtures execute its
+actual insertion, replacement, checkbox, failure, deletion and checkout code
+against isolated manager/native-call substitutes, including mixed ordinary and
+stance rows. These prove host behavior, not the game's live calling conventions
+or visual row layout. Constructor/prolog/call-site guards protect installation;
+live UI validation remains mandatory.
+
+This first adapter targets regular career shops and My Cars. The junkman
+backroom uses marker indices rather than ordinary purchases: the stance entry
+is hidden there, and entering its cart discards an unpurchased stance item before
+native marker setup. It is not yet a supported stance purchase surface. Price
+is currently fixed at zero; configurable charging is not implemented.
 
 Live validation requires a zero-cost stance-only cart and a mixed native-part
 cart in both My Cars and career shop: preview, reopen unchanged, cancel editor,
-remove item, discard all, insufficient funds (configured price), purchase once,
+remove item, discard all, purchase once,
 reopen absolute values, then save/reload and race rendering. Test copies only
 until those checks pass. The currently running test still uses direct-commit
 5b5f760 and must not be described as having this integration.
