@@ -72,6 +72,12 @@ add_executable(customization_frontend_list_tests tests/customization_frontend_li
 target_compile_options(customization_frontend_list_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_frontend_list COMMAND customization_frontend_list_tests)
 
+add_executable(customization_hook_chain_tests tests/customization_hook_chain_tests.cpp)
+target_compile_definitions(customization_hook_chain_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(customization_hook_chain_tests PRIVATE /W4 /utf-8 /EHsc)
+target_link_libraries(customization_hook_chain_tests PRIVATE minhook)
+add_test(NAME customization_hook_chain COMMAND customization_hook_chain_tests)
+
 add_executable(customization_random_tests tests/customization_random_tests.cpp)
 target_link_libraries(customization_random_tests PRIVATE minhook bcrypt)
 target_compile_definitions(customization_random_tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
@@ -80,7 +86,7 @@ add_test(NAME customization_random COMMAND customization_random_tests)
 
 # Real separate DLL instances exercise both ASI initialization orders. Only the
 # native patch/UI startup is stubbed; discovery, exported ABI and state are real.
-foreach(kind IN ITEMS unlimiter camera)
+foreach(kind IN ITEMS unlimiter camera stance)
   add_library(camera_runtime_fixture_${kind} SHARED tests/camera_runtime_fixture.cpp)
   target_include_directories(camera_runtime_fixture_${kind} PRIVATE includes)
   target_compile_definitions(camera_runtime_fixture_${kind} PRIVATE MWCL_CAMERA_RUNTIME_FIXTURE NOMINMAX _CRT_SECURE_NO_WARNINGS)
@@ -93,9 +99,14 @@ foreach(kind IN ITEMS unlimiter camera)
 endforeach()
 set_target_properties(camera_runtime_fixture_unlimiter PROPERTIES OUTPUT_NAME NFSMWUnlimiter)
 set_target_properties(camera_runtime_fixture_camera PROPERTIES OUTPUT_NAME NFSMWExtendedCamera)
+set_target_properties(camera_runtime_fixture_stance PROPERTIES OUTPUT_NAME NFSMWStanceHost)
 add_executable(camera_runtime_peer_tests tests/camera_runtime_peer_tests.cpp)
 target_compile_options(camera_runtime_peer_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME camera_runtime_unlimiter_first COMMAND camera_runtime_peer_tests
   $<TARGET_FILE:camera_runtime_fixture_unlimiter> $<TARGET_FILE:camera_runtime_fixture_camera>)
 add_test(NAME camera_runtime_camera_first COMMAND camera_runtime_peer_tests
   $<TARGET_FILE:camera_runtime_fixture_camera> $<TARGET_FILE:camera_runtime_fixture_unlimiter>)
+add_test(NAME camera_runtime_stance_first COMMAND camera_runtime_peer_tests
+  $<TARGET_FILE:camera_runtime_fixture_stance> $<TARGET_FILE:camera_runtime_fixture_camera>)
+add_test(NAME camera_runtime_camera_before_stance COMMAND camera_runtime_peer_tests
+  $<TARGET_FILE:camera_runtime_fixture_camera> $<TARGET_FILE:camera_runtime_fixture_stance>)

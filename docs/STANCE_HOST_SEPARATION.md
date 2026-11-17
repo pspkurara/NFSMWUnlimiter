@@ -43,8 +43,11 @@ headers. It chains the existing game Setup entry, observes both random-parts cal
 sites after their current targets return, and accepts the cart-name call target
 only when owned by the loaded dependency. It currently recognizes the 3.3.1 layout
 family and rejects the integrated fork to avoid duplicate hooks. It is excluded
-from installation snapshots; native chaining, startup order and runtime QA are
-still pending. Its shared camera/frame support also needs isolation review before
+from installation snapshots. An actual x86 E9 entry chained through MinHook now
+passes owner, ECX, original-before-extension, return-value and restoration checks.
+Separate ASI camera/runtime fixtures pass both stance-host/camera load orders.
+Actual dependency startup and game runtime QA are still pending. Its shared
+camera/frame support also needs isolation review before
 calling this a standalone stance product. A successful compile is not release
 evidence or proof of compatibility with newer layout families.
 
@@ -53,3 +56,9 @@ does not yet reflect saved stance; body-mounted race effects (light flares and
 other emitters) need the body adjustment, while tire effects must follow contact
 geometry. Owned My Cars stance in a custom race was confirmed by the user after
 the early customization-copy fix on 2026-11-18.
+
+Effect correction must follow attachment semantics, not whether an emitter is
+above ground. Body markers need the same body transform, including front/rear
+rake. Ground/contact effects must retain the final native/Unlimiter contact data;
+do not add body height a second time. Inspect existing radius/contact compensation
+before changing tires, smoke or skid positions, and verify emitter ownership.

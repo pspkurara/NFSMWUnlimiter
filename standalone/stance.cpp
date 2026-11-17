@@ -8,6 +8,7 @@
 #include "../CustomizationBridge.h"
 #include "../CustomizationCamera.h"
 #include "../CustomizationStanceMenu.h"
+#include "../CustomizationHookChain.h"
 #include <atomic>
 
 namespace StandaloneStance {
@@ -19,15 +20,7 @@ static SetupFn OriginalSetup=nullptr;
 static RandomFn OriginalRandom[2]{};
 
 static uintptr_t OwnedTarget(uintptr_t site,BYTE opcode) {
-    if(*reinterpret_cast<const BYTE*>(site)!=opcode)return 0;
-    const auto target=site+5+*reinterpret_cast<const int32_t*>(site+1);
-    HMODULE owner=nullptr;
-    MEMORY_BASIC_INFORMATION memory{};
-    if(!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<const char*>(target),&owner)||owner!=Unlimiter||
-       !VirtualQuery(reinterpret_cast<const void*>(target),&memory,sizeof(memory))||
-       memory.State!=MEM_COMMIT||!(memory.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE)))return 0;
-    return target;
+    return CustomizationHookChain::OwnedTarget(site,opcode,Unlimiter);
 }
 static int __fastcall Setup(DWORD* screen,void*) {
     const int result=OriginalSetup(screen);
