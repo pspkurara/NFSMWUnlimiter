@@ -30,6 +30,9 @@ namespace CustomizationCamera
         DWORD controller = 0;
         float deadzone = 0.22f;
         float garageSpeed = 1.0f;
+        bool controllerZoom=true,overrideZoomButtons=false;
+        uint32_t zoomInButton=0x10000,zoomOutButton=0x20000;
+        float garageZoomSpeed=1.f;
     };
 
     static Options Config;
@@ -258,9 +261,28 @@ namespace CustomizationCamera
             reinterpret_cast<void(__thiscall*)(void*,float)>(Target)(mover,speed);
     }
     static void __fastcall NativeGarageZoom(void* mover,void*,float speed) {
+        if(!Config.controllerZoom||Config.overrideZoomButtons)return;
         const int mode=*reinterpret_cast<const int*>(static_cast<const BYTE*>(mover)+0x80);
         if(CustomizationGarageInput::ForwardZoom(SuppressNativeGarageRotation,mode,speed))
             reinterpret_cast<void(__thiscall*)(void*,float)>(0x476FF0)(mover,speed);
+    }
+    static void* ZoomMover=nullptr;
+    static void ApplyGarageZoom(DWORD* garage,bool inputReady) {
+        auto mover=GarageMover(garage);
+        if(!Config.overrideZoomButtons||!mover)return;
+        float speed=0;XINPUT_STATE pad{};
+        if(Config.controllerZoom&&inputReady&&GetPadState&&GetPadState(Config.controller,&pad)==ERROR_SUCCESS) {
+            const auto& g=pad.Gamepad;
+            speed=(CustomizationGarageInput::ButtonAmount(Config.zoomOutButton,g.wButtons,g.bLeftTrigger,g.bRightTrigger)-
+                   CustomizationGarageInput::ButtonAmount(Config.zoomInButton,g.wButtons,g.bLeftTrigger,g.bRightTrigger))*Config.garageZoomSpeed;
+        }
+        if(speed!=0) {
+            reinterpret_cast<void(__thiscall*)(void*,float)>(0x476FF0)(mover,speed);ZoomMover=mover;
+        } else {
+            if(ZoomMover==mover&&*reinterpret_cast<int*>(static_cast<BYTE*>(mover)+0x80)==1)
+                reinterpret_cast<void(__thiscall*)(void*,float)>(0x476FF0)(mover,0);
+            ZoomMover=nullptr;
+        }
     }
     static bool InstallNativeGarageRotation() {
         const uintptr_t sites[]={0x7A241E,0x7A2428,0x7A2455,0x7A2480,0x7A24A4,0x7A24D0,0x7A25D1,0x7A2432,0x7A25A1};
@@ -292,6 +314,9 @@ namespace CustomizationCamera
         const bool screenAllows=PartsScreen?PartsScreen[0x148/4]!=0x307:
             !Config.partsOnly&&(*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134));
         const bool eligible=Config.garage&&NativeGarageRotationVerified&&screenAllows&&GarageMover(garage);
+        // Zoom policy is independent of stick rotation. The mouse wheel calls
+        // its native setter from another call site and remains untouched.
+        ApplyGarageZoom(garage,inputReady&&nativePermission&&NativeGarageRotationVerified);
         if (!eligible)
         {
             if(!nativeMouse)StopGarageSpeeds(garage);
@@ -590,6 +615,11 @@ namespace CustomizationCamera
         Config.controller = DWORD(Clamp(float(settings.ReadInteger("Input", "ControllerIndex", 0)), 0, 3));
         Config.deadzone = Number(settings, "Input", "Deadzone", 0.22f, 0, 0.95f);
         Config.garageSpeed = Number(settings, "Garage", "RotationSpeed", 1, 0.01f, 10);
+        Config.controllerZoom=settings.ReadInteger("Garage","ControllerZoom",1)!=0;
+        Config.overrideZoomButtons=settings.ReadInteger("Garage","OverrideZoomButtons",0)!=0;
+        Config.zoomInButton=uint32_t(settings.ReadInteger("Garage","ZoomInButton",0x10000))&0x3FFFFu;
+        Config.zoomOutButton=uint32_t(settings.ReadInteger("Garage","ZoomOutButton",0x20000))&0x3FFFFu;
+        Config.garageZoomSpeed=Number(settings,"Garage","ZoomSpeed",1,.01f,10);
 
         const unsigned char mouseDelta[]={0x89,0x4E,0x14,0x89,0x56,0x18};
         const unsigned char mouseHeld[]={0xA0,0x70,0x7F,0x98,0};
@@ -620,7 +650,7 @@ namespace CustomizationCamera
         const unsigned char joyBranch[] = {0x8A, 0x46, 0x78, 0x84, 0xC0, 0x75, 0x0D, 0xA0, 0x34, 0x61, 0x92, 0};
         const unsigned char rotateFunction[] = {0x8B, 0x81, 0x80, 0, 0, 0, 0x33, 0xD2};
         // Also supplies native-menu updates when both optional garage features are off.
-        if(Config.garage) {
+        if(Config.garage||!Config.controllerZoom||Config.overrideZoomButtons) {
             NativeGarageRotationVerified=InstallNativeGarageRotation();
             if(!NativeGarageRotationVerified)Report("Native garage rotation call sites differ; retaining native garage camera input.");
         }

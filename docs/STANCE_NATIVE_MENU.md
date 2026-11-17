@@ -156,3 +156,16 @@ assignment, independent zoom enablement, separate mouse zoom and native-image
 prompts following the effective mapping are remaining input work. Live image
 appearance, click hitboxes and interaction with the user's texture replacement
 must be verified before release.
+
+The next input revision assigns held precision to X, fast adjustment to L3, and
+the reset dialog to Start, leaving native LB/RB axle navigation available. The
+footer text is mouseable: precision toggles on click; any actual pad activity
+clears that latch and returns to hold/release behavior. Reset and Showcase footer
+labels are clickable too. Modifier/reset XInput masks and keyboard VKs are read
+from [StanceMenu] in NFSMWCustomizationCamera.ini even without the camera ASI.
+FineButton/FastButton/ResetButton and FineKey/FastKey/ResetKey are independent.
+The footer's fine/reset names follow those masks, but arbitrary remapped native
+images, axle-key reassignment and remaining hardcoded help text are unfinished.
+Normal/fast movement rounds to an absolute zero-origin step grid on adjustment;
+fine movement remains relative. Loading/selecting rows never quantizes a value.
+The session fixture exercises 10,000 opposite coarse moves without float drift.

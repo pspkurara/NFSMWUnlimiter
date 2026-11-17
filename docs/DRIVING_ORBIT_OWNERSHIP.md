@@ -29,3 +29,13 @@ input: native SetZoomSpeed(0) also claims manual control. Actual nonzero zoom ma
 claim that mode, and a subsequent zero release stops it normally. The final
 native horizontal-stop call is suppressed together with the six directional
 rotation/reset calls so an idle controller cannot claim a manual orbit.
+
+[Garage] ControllerZoom independently disables mapped controller zoom. Mouse
+wheel calls remain native. OverrideZoomButtons replaces only controller zoom
+with physical XInput ZoomInButton/ZoomOutButton masks and ZoomSpeed; LT/RT masks
+retain analog pressure. These settings do not require enabling stick rotation.
+The replacement stops on release and across focus/update gaps without turning
+an automatic mover into manual on neutral input. This revision has regression
+coverage for binding masks/trigger pressure, but live zoom direction, button
+conflicts and settings combinations are still unverified. The stance-only host
+does not yet implement its own scoped controller-zoom suppression.

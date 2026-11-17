@@ -33,13 +33,15 @@ static Session EditSession;
 static std::array<DWORD*,7> Sliders{};
 static bool RefreshPending=false;
 static void Refresh();
+static int SliderIndex(DWORD* slider);
+static void ShowResetHelp(unsigned channel);
 static bool ShowcaseAway=false,ShowcaseReturning=false,InspectHeld=false,ShowcaseAvailable=false;
 static unsigned ShowcaseSelection=0;
 static void OpenShowcase();
 static bool ResetDialogAvailable=false;
 static unsigned ResetConfirmed=0,ResetAll=0,ResetDismissed=0,ResetAxle=0;
 static unsigned ResetSelectedLabel=0,ResetAllLabel=0;
-struct FooterGroup {DWORD* object;std::array<DWORD*,2> reset{},showcase{};};
+struct FooterGroup {DWORD* object;std::array<DWORD*,2> fine{},reset{},showcase{};};
 static std::vector<FooterGroup> FooterGroups;
 static std::array<DWORD*,6> LimitLabels{};
 static std::array<DWORD*,2> AxleButtons{};
@@ -136,13 +138,19 @@ static void InstallGarageView() {
 
 static const char* Labels[]={"Height","Track","Camber","Width","Radius","Brake"};
 static float NormalStep=5,FineStep=1,FastStep=20;
-static float StepMultiplier() {
-    bool fine=(GetAsyncKeyState(VK_SHIFT)&0x8000)!=0,fast=(GetAsyncKeyState(VK_CONTROL)&0x8000)!=0;
+static uint32_t FineButton=0x4000,FastButton=0x40,ResetButton=0x10;
+static int FineKey=VK_SHIFT,FastKey=VK_CONTROL,ResetKey=VK_DELETE;
+static bool MouseFine=false,ResetHeld=false;
+static bool KeyDown(int key){return key>0&&key<256&&(GetAsyncKeyState(key)&0x8000)!=0;}
+static float StepMultiplier(bool* precise=nullptr) {
+    bool fine=MouseFine||KeyDown(FineKey),fast=KeyDown(FastKey);
     XINPUT_STATE pad{};
     if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS) {
-        fine|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_SHOULDER)!=0;
-        fast|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_LEFT_SHOULDER)!=0;
+        const auto& g=pad.Gamepad;
+        fine|=CustomizationGarageInput::ButtonAmount(FineButton,g.wButtons,g.bLeftTrigger,g.bRightTrigger)>0;
+        fast|=CustomizationGarageInput::ButtonAmount(FastButton,g.wButtons,g.bLeftTrigger,g.bRightTrigger)>0;
     }
+    if(precise)*precise=fine;
     return fine?FineStep:fast?FastStep:NormalStep;
 }
 static bool Core() {
@@ -209,8 +217,24 @@ static void Tick() {
         if(foreground==GetCurrentProcessId()) {
             held=(GetAsyncKeyState(VK_SPACE)&0x8000)!=0;
             XINPUT_STATE pad{};
-            if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS)
+            bool reset=KeyDown(ResetKey);
+            if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS) {
                 held|=(pad.Gamepad.wButtons&(XINPUT_GAMEPAD_BACK|XINPUT_GAMEPAD_RIGHT_THUMB))!=0;
+                const auto& g=pad.Gamepad;
+                // A connected idle pad does not cancel the mouse toggle. An
+                // actual controller action reclaims hold/release semantics.
+                if(g.wButtons||g.bLeftTrigger>30||g.bRightTrigger>30||
+                   std::abs(int(g.sThumbLX))>8000||std::abs(int(g.sThumbLY))>8000||
+                   std::abs(int(g.sThumbRX))>8000||std::abs(int(g.sThumbRY))>8000) {
+                    if(MouseFine){MouseFine=false;RefreshPending=true;}
+                }
+                reset|=CustomizationGarageInput::ButtonAmount(ResetButton,g.wButtons,g.bLeftTrigger,g.bRightTrigger)>0;
+            }
+            if(reset&&!ResetHeld) {
+                const int index=SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4]));
+                if(index>=0&&index<6)ShowResetHelp(unsigned(index));
+            }
+            ResetHeld=reset;
         }
         if(held&&!InspectHeld)OpenShowcase();
         InspectHeld=held;
@@ -275,13 +299,13 @@ static void Footer() {
         std::array<DWORD*,2> labels{};unsigned count=0;
         auto child=reinterpret_cast<DWORD*>(group[0x64/4]);
         for(unsigned i=0;i<group[0x60/4]&&child;++i,child=reinterpret_cast<DWORD*>(child[1])) {
-            if(child[0]==0x89B05C&&child!=at->reset[0]&&child!=at->reset[1]&&
+            if(child[0]==0x89B05C&&child!=at->fine[0]&&child!=at->fine[1]&&child!=at->reset[0]&&child!=at->reset[1]&&
                child!=at->showcase[0]&&child!=at->showcase[1]&&count<2)labels[count++]=child;
         }
         for(unsigned i=0;i<count;++i) {
             SetText(labels[i],"Copy");
-            for(unsigned action=0;action<(ShowcaseAvailable?2u:1u);++action) {
-                auto& prompt=action?at->showcase[i]:at->reset[i];
+            for(unsigned action=0;action<(ShowcaseAvailable?3u:2u);++action) {
+                auto& prompt=action==0?at->fine[i]:action==1?at->reset[i]:at->showcase[i];
                 if(!prompt) {
                     prompt=(*reinterpret_cast<DWORD*(__thiscall**)(DWORD*,bool)>(labels[i][0]+4))(labels[i],false);
                     if(!prompt)continue;
@@ -289,6 +313,7 @@ static void Footer() {
                     prompt[0x10/4]=bStringHash(name);
                     prompt[0x58/4]=0; // Native package owns clone; its render cache must be fresh.
                     CustomizationFrontendList::CopyDrawData(prompt,labels[i]);
+                    if(NativePromptButtons){prompt[0x1C/4]|=0x20000;MouseListDirty=true;}
                     CustomizationFrontendList::AppendChild(group,prompt,FEMinList_AddNode);
                 }
                 auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);
@@ -296,10 +321,15 @@ static void Footer() {
                     // PC's expanded footer already has Accept/Cancel on this
                     // row. Keep the extra actions on a separate line above it.
                     const bool pc=group[0x10/4]!=bStringHash("HELP_BUTTON");
-                    float position[]={data[7]-(action?300.f:130.f),data[8]-(pc?26.f:0.f),data[9]};
+                    const float offsets[]={0,150,320};
+                    float position[]={data[7]-offsets[action],data[8]-(pc?26.f:0.f),data[9]};
                     reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(prompt,position,false);
                 }
-                SetText(prompt,action?"Select: Showcase":"X: Reset",false);
+                char caption[96]{};
+                if(action==0)sprintf_s(caption,"%s: Fine [%s]",CustomizationGarageInput::ButtonName(FineButton),MouseFine?"ON":"hold");
+                else if(action==1)sprintf_s(caption,"%s: Reset",CustomizationGarageInput::ButtonName(ResetButton));
+                else strcpy_s(caption,"Select: Showcase");
+                SetText(prompt,caption,false);
             }
         }
     }
@@ -317,8 +347,8 @@ static void Heading(const char* error=nullptr) {
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
     Footer();
-    Text(0x05CDDED4,ShowcaseAvailable?"Select / Space: Showcase   A: cart   LT/RT: axle   Shift: fine   Ctrl: fast":
-        "A: cart   LT/RT: axle   X: Reset   Shift: fine   Ctrl: fast");
+    Text(0x05CDDED4,ShowcaseAvailable?"LB/RB: axle   X/Shift: fine   L3/Ctrl: fast   Select/Space: Showcase":
+        "A: cart   LB/RB: axle   X/Shift: fine   L3/Ctrl: fast   Start/Del: Reset");
 }
 static void OpenShowcase() {
     if(!ShowcaseAvailable||!Screen||Closing||ResetChannel>=0||!Current()) {
@@ -446,7 +476,7 @@ static void ShowResetHelp(unsigned channel) {
     char text[512]{};
     sprintf_s(text,"Reset selected: %s (%s). Reset all: all parameters, both axles.\n"
         "Restore inherited vehicle/preset values. This is a preview; A adds it to the cart, and shop checkout purchases it.\n\n"
-        "LT/RT: select axle. Y: copy to opposite axle. RB/Shift: fine. LB/Ctrl: fast. B: cancel the edit.",
+        "LB/RB: axle. Y: copy. X/Shift: hold for fine adjustment; mouse click toggles it. L3/Ctrl: fast. Start/Delete: reset. B: cancel.",
         Labels[channel],axles[EditSession.axle]);
     ResetChannel=int(channel);ResetAxle=EditSession.axle;ResetOwner=Owner;
     // The native helper chooses Dialog.fng in the frontend and owns focus/input.
@@ -462,7 +492,8 @@ static void __fastcall Act(DWORD* slider,void*,const char* package,unsigned mess
     if(message!=Left&&message!=Right)return;
     if(index==6)EditSession.enabled=message==Right;
     else {
-        EditSession.Step(unsigned(index),message==Right?1:-1,StepMultiplier());
+        bool precise=false;const float multiplier=StepMultiplier(&precise);
+        EditSession.Step(unsigned(index),message==Right?1:-1,multiplier,!precise);
         // An explicit geometry adjustment must be visible even when the global
         // feature was initially off. Cancel still restores the prior flag.
         EditSession.enabled=true;
@@ -488,6 +519,16 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(Closing)return;
     if(!Current()){Cancel();Leave();return;}
+    if(message==0xF459B307&&object&&ResetChannel<0)for(const auto& footer:FooterGroups) {
+        for(unsigned i=0;i<2;++i) {
+            if(object==footer.fine[i]){MouseFine=!MouseFine;Heading();return;}
+            if(object==footer.reset[i]) {
+                const int index=SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4]));
+                if(index>=0&&index<6)ShowResetHelp(unsigned(index));return;
+            }
+            if(object==footer.showcase[i]){OpenShowcase();return;}
+        }
+    }
     if(message==0xF459B307&&object&&ResetChannel<0&&(object==AxleButtons[0]||object==AxleButtons[1])) {
         EditSession.SelectAxle((EditSession.axle+(object==AxleButtons[1]?1:2))%3);Refresh();return;
     }
@@ -523,8 +564,8 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
         return;
     }
     if(message==Inherit) {
-        auto selected=reinterpret_cast<DWORD*>(screen[0x34/4]);const int index=SliderIndex(selected);
-        if(index>=0&&index<6)ShowResetHelp(unsigned(index));return;
+        // X is a held precision modifier, not the old destructive reset action.
+        return;
     }
     // Use the same mapped frontend action as native customization screens,
     // in addition to the R3/Space convenience input polled by Tick.
@@ -592,6 +633,7 @@ static void __fastcall Destructor(DWORD* screen,void*) {
         FooterGroups.clear();
         LimitLabels.fill(nullptr);
         AxleButtons.fill(nullptr);MouseListDirty=false;
+        MouseFine=false;ResetHeld=false;
     }
     OriginalDestructor(screen);
 }
@@ -668,6 +710,12 @@ static bool Install(uintptr_t compatibleCartName=0,bool orbitView=true) {
     NormalStep=CustomizationCamera::Number(menuSettings,"StanceMenu","StepMultiplier",5,.01f,1000);
     FineStep=CustomizationCamera::Number(menuSettings,"StanceMenu","FineStepMultiplier",1,.01f,1000);
     FastStep=CustomizationCamera::Number(menuSettings,"StanceMenu","FastStepMultiplier",20,.01f,1000);
+    FineButton=uint32_t(menuSettings.ReadInteger("StanceMenu","FineButton",0x4000))&0x3FFFFu;
+    FastButton=uint32_t(menuSettings.ReadInteger("StanceMenu","FastButton",0x40))&0x3FFFFu;
+    ResetButton=uint32_t(menuSettings.ReadInteger("StanceMenu","ResetButton",0x10))&0x3FFFFu;
+    FineKey=menuSettings.ReadInteger("StanceMenu","FineKey",VK_SHIFT);
+    FastKey=menuSettings.ReadInteger("StanceMenu","FastKey",VK_CONTROL);
+    ResetKey=menuSettings.ReadInteger("StanceMenu","ResetKey",VK_DELETE);
     const BYTE mouseList[]={0x64,0xA1,0,0,0,0,0x6A,0xFF};
     const BYTE buttonTexture[]={0x56,0x8B,0x74,0x24,0x08,0x85,0xF6};
     NativePromptButtons=CustomizationCamera::Matches(0x5B88F0,mouseList)&&CustomizationCamera::Matches(0x515BB0,buttonTexture);

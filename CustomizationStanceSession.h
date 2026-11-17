@@ -26,9 +26,13 @@ struct Session {
     float Value(unsigned c,unsigned a) const {const auto i=c*2+a;return active.mask&(1u<<i)?active.values[i]:info.inherited[i];}
     bool Includes(unsigned a) const {return !axle||axle==a+1;}
     void SelectAxle(unsigned next) {if(next>2)return;axle=next;if(next)referenceAxle=next-1;}
-    bool Step(unsigned c,int direction,float multiplier=1) {
+    bool Step(unsigned c,int direction,float multiplier=1,bool snapToGrid=false) {
         if(c>=6||(direction!=-1&&direction!=1)||!std::isfinite(multiplier)||multiplier<=0)return false;
-        const double next=double(Value(c,axle?axle-1:referenceAxle))+double(info.step[c])*direction*multiplier;
+        const double increment=double(info.step[c])*multiplier;
+        const double current=double(Value(c,axle?axle-1:referenceAxle));
+        // Round only an actual coarse adjustment, never loading/selecting a row.
+        // Integer grid coordinates prevent accumulated left/right float drift.
+        const double next=snapToGrid?(std::round(current/increment)+direction)*increment:current+increment*direction;
         const float value=float(std::clamp(next,double(info.minimum[c]),double(info.maximum[c])));
         for(unsigned a=0;a<2;++a)if(Includes(a)) {
             const auto i=c*2+a;
