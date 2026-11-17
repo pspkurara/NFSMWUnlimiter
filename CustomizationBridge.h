@@ -60,12 +60,30 @@ struct Context {
     const char* name{};
     unsigned body{},frontWheel{},rearWheel{};
     int kit{};
-    Matrix heightWorld{},heightDelta{},drawRoot{};
+    Matrix heightWorld{},heightDelta{},drawRoot{},nativeRoot{};
     bool heightChanged{},rootCaptured{},traceRootSeen{};
+    bool clipBodySeen=false,clipBodyRigid=true;
     unsigned trace=0,traceParts=0;
 };
 thread_local Context* current=nullptr;
 static bool TraceBodyMatrices=false;
+static bool DamageVisibilityVerified=false;
+static void __stdcall ObserveHiddenPanel(unsigned hidden) {
+    if(current&&(hidden&0xFF))current->clipBodyRigid=false;
+}
+static void __declspec(naked) DamageHiddenCave() {
+    __asm {
+        // Preserve the exact native virtual query and its one-argument cleanup.
+        call dword ptr [eax+0x1C]
+        pushad
+        push eax
+        call ObserveHiddenPanel
+        popad
+        test al,al
+        push 0x74EA86
+        ret
+    }
+}
 // Opt-in, bounded snapshots: render hooks must not produce a log every frame.
 struct TraceKey {
     uintptr_t car,view;float front,rear;int reflection;
@@ -178,6 +196,13 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
     if(!Ready()||!car||!car[33]||!car[34]||!body||!position)
         return originalRender(car,view,position,body,tires,brakes,spinners,flags,light,reflection,shadow,tireLod,carLod);
     Context context=CarContext(car);
+    if(car[0x40/4]&&CustomizationClip::Enabled()) {
+        context.clipBodyRigid=DamageVisibilityVerified;
+        // Reject any hidden body-region model across the five native LODs.
+        // This avoids assuming that every renderer wrapper preserves one LOD.
+        if(context.clipBodyRigid)for(unsigned model=0;model<24*5;++model)
+            if(car[0xB84/4+model]&1u)context.clipBodyRigid=false;
+    }
     DWORD* ride=reinterpret_cast<DWORD*>(car[33]);
     const bool frontend=*reinterpret_cast<int*>(0x925e90)==3;
     if(frontend&&!reflection&&view==reinterpret_cast<void*>(0x919650)) {
@@ -254,6 +279,7 @@ Matrix* __fastcall CaptureBodyRoot(Matrix* destination,void*,const Matrix* sourc
             current->heightWorld=CustomizationMath::Multiply(CustomizationMath::Multiply(inverse,current->heightDelta),*source);
             current->drawRoot=current->heightChanged
                 ?CustomizationMath::Multiply(current->heightDelta,*source):*source;
+            current->nativeRoot=*source;
             current->rootCaptured=true;
             TraceMatrix(*current,"height-world",&current->heightWorld);
         } else {
@@ -266,6 +292,13 @@ Matrix* __fastcall CaptureBodyRoot(Matrix* destination,void*,const Matrix* sourc
 }
 void __fastcall BodyPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,void* lighting,unsigned flags) {
     Matrix* transformed=matrix;
+    if(current&&current->car==car&&current->rootCaptured&&car[0x40/4]&&CustomizationClip::Enabled()) {
+        const auto address=reinterpret_cast<uintptr_t>(part),begin=reinterpret_cast<uintptr_t>(car)+0xB84;
+        if(address>=begin&&address-begin<24*20) {
+            if(address-begin>=23*20)current->clipBodySeen=true;
+            current->clipBodyRigid=current->clipBodyRigid&&matrix&&CustomizationMath::SamePose(*matrix,current->nativeRoot);
+        }
+    }
     if(current&&current->car==car&&current->rootCaptured&&current->heightChanged&&matrix) {
         // Native render queues keep the matrix pointer. Allocate from the game's frame pool.
         auto allocate=reinterpret_cast<Matrix*(__cdecl*)(int)>(0x405ed0);
@@ -301,9 +334,10 @@ void __fastcall DirectBody(void* view,void*,void* model,Matrix* matrix,void* lig
 template<unsigned Wheel>
 void __fastcall WheelPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,void* lighting,unsigned flags) {
     CustomizationClip::Ticket ticket;
-    // PC 0x74EA4E reads CarRenderInfo+0x40 as mDamageBehaviour. A fixed plane
-    // cannot describe its independently posed or damaged fender panels.
-    if(current&&current->car==car&&current->rootCaptured&&!car[0x40/4]) {
+    // A damage actor can exist on an undamaged driving car. Accept its rigid
+    // boundary only after observing BODY and unchanged native panel poses.
+    if(current&&current->car==car&&current->rootCaptured&&
+        (!car[0x40/4]||(current->clipBodySeen&&current->clipBodyRigid))) {
         ticket=CustomizationClip::BeginWheel(current->name,current->kit,Wheel,&current->drawRoot.m[0][0],view);
     }
     originalPart(car,view,part,matrix,lighting,flags);
@@ -396,6 +430,12 @@ bool Install() {
             }
         }
     } else Log("Wheel capture disabled: another mod owns a submission call site.");
+    if(CustomizationClip::Enabled()) {
+        const unsigned char hiddenQuery[]={0xFF,0x50,0x1C,0x84,0xC0};
+        if(Bytes(0x74EA81,hiddenQuery,sizeof(hiddenQuery))) {
+            injector::MakeJMP(0x74EA81,DamageHiddenCave,true);DamageVisibilityVerified=true;
+        } else Log("Damage visibility query unavailable; actor wheel clipping remains disabled.");
+    }
     Log(InstallTireEffects()?"Race tire matrices, contact FX and proportional skid width hooks installed.":
         "Race tire effects disabled: unknown layout or competing hooks.");
     Log("Stance bridge installed for PC 1.3, Unlimiter 3.3.1.1338.");return true;

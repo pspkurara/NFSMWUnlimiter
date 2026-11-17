@@ -16,6 +16,13 @@ inline Matrix Multiply(const Matrix& a,const Matrix& b) {
         for(int k=0;k<4;++k) r.m[i][j]+=a.m[i][k]*b.m[k][j];
     return r;
 }
+inline bool SamePose(const Matrix& a,const Matrix& b) {
+    // Conservative boundary check, not a general approximate matrix equality:
+    // a moved/damaged panel must not use a rigid, calibrated fender plane.
+    for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+        if(!std::isfinite(a.m[i][j])||!std::isfinite(b.m[i][j])||std::fabs(a.m[i][j]-b.m[i][j])>.0001f)return false;
+    return true;
+}
 inline bool RigidInverse(const Matrix& a,Matrix& out) {
     // Reject scaled or degenerate transforms rather than corrupting animated parts.
     for(int i=0;i<4;++i) for(int j=0;j<4;++j)

@@ -121,11 +121,28 @@ No square root, matrix inversion or INI parsing occurs for untagged geometry.
 
 The host captures the native pre-animation biased root at `0x74E91D`, rather
 than inferring it from a BASE/BODY part which may already contain door/damage
-animation. Non-rigid or invalid roots skip height adjustment and clipping.
-Instances with a damage actor (`CarRenderInfo+0x40`) skip wheel clipping because
-a fixed boundary cannot follow independently posed panels. This actor can exist
-before visible damage; driving instances with an actor may therefore remain
-unclipped. Its real-game coverage still needs verification.
+animation. Singular, non-affine or invalid roots skip height adjustment and clipping;
+valid garage scale/shear uses the checked affine inverse.
+For a damage actor (`CarRenderInfo+0x40`), the adapter requires an observed BODY
+submission and unchanged native poses for all observed body-region parts before
+wheel clipping. A displaced, rotated, invalid or independently animated panel
+disables clipping for that car render. The guarded virtual IsPartHidden call at
+74EA81 records hidden damage parts, including parts never submitted for drawing;
+native hidden model flags across the body-region LODs also disable the rigid boundary.
+If that optional call-site signature differs, damage-actor clipping stays disabled.
+When clipping is disabled, this optional query hook and body-pose scans are absent.
+The test compares pre-height poses to the
+same captured native root, so stance lowering alone cannot look like damage.
+An actor's presence alone no longer disables an intact driving car. This remains
+conservative: missing BODY, hidden geometry and model-specific panel
+transforms may retain native wheels. Live actor/LOD coverage needs verification.
+
+`python tools/check_damage_clip_bridge.py` extracts the production x86 cave and
+executes its virtual query, observer and resume path in an isolated fixture.
+Only the resume PC is relocated. It verifies hidden/visible results, original EAX,
+native TEST flags and exact stack cleanup under JMP entry, as used by the patch.
+This passed on Windows 11; it proves the adapter ABI, not the game's actor layout
+or correctness of any particular calibrated fender boundary.
 
 Performed on the current Windows 11 machine:
 

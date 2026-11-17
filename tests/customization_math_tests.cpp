@@ -6,6 +6,13 @@
 using namespace CustomizationMath;
 void near(float a,float b) { if(!std::isfinite(a)||!std::isfinite(b)||std::fabs(a-b)>0.0001f) { std::fprintf(stderr,"%f != %f\n",a,b);std::exit(1); } }
 int main() {
+    auto intact=Identity();intact.m[3][0]=1000;
+    auto damaged=intact;damaged.m[3][2]=.01f;
+    if(!SamePose(intact,intact)||SamePose(intact,damaged))return 6;
+    damaged=intact;damaged.m[0][2]=.01f;
+    if(SamePose(intact,damaged))return 7;
+    damaged=intact;damaged.m[2][2]=NAN;
+    if(SamePose(intact,damaged))return 8;
     const auto nan=std::numeric_limits<float>::quiet_NaN();
     for(float height:{-.75f,.75f}) {
         near(HeightTransform(0,0,height,height).m[3][2],height);

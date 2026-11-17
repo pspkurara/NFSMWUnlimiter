@@ -21,6 +21,7 @@ x86/
 bld/
 build-customization/
 build-camera/
+build-clip-check/
 dist/
 __pycache__/
 [Bb]in/

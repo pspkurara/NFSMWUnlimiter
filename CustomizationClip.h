@@ -182,6 +182,7 @@ struct Ticket {
     float worldPlane[4] = {};
 };
 inline const char* Status() { return Detail::status; }
+inline bool Enabled() { return Detail::installed; }
 
 // Call once during plugin initialization, before rendering starts. The caller's
 // existing EXE fingerprint/version gate remains mandatory.
