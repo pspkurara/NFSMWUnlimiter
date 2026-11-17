@@ -11,5 +11,12 @@ int main() {
     if(!Adjust(.8f,.31f,stock,stock,a)||a.positionY!=.8f||a.radius!=.31f||a.skidScale!=1)return 3;
     if(Adjust(.8f,.3f,stock,{-.9f,std::numeric_limits<float>::quiet_NaN(),.3f},a))return 4;
     if(Adjust(.8f,.3f,stock,{-.9f,0,.3f},a))return 5;
+    if(!Adjust(.8f,.31f,stock,wide,a)||std::fabs(a.radius-.36f)>.00001f)return 6;
+    auto nearDefault=stock;nearDefault.radius+=.00001f;
+    if(!Adjust(.8f,.31f,stock,nearDefault,a)||std::fabs(a.radius-.31001f)>.000001f)return 7;
+    nearDefault.radius=stock.radius-.00001f;
+    if(!Adjust(.8f,.31f,stock,nearDefault,a)||std::fabs(a.radius-.30999f)>.000001f)return 8;
+    if(Adjust(.8f,.01f,stock,{-.8f,.2f,.005f},a))return 9;
+    if(Adjust(.8f,.3f,{-.8f,.2f,0},stock,a))return 10;
     std::cout<<"Race wheel offsets, radius and proportional skid calibration passed\n";
 }

@@ -97,6 +97,21 @@ clip profiles at different stance extremes. Unknown RideInfo copies are skipped
 instead of guessing ownership. Fender-specific boundaries and stretched-tire
 geometry require additional vehicle-aware work.
 
+## Race radius calibration
+
+The connection's native render/contact radius can differ from the scaled wheel
+mesh radius. Radius adjustment therefore applies the mesh change as a delta:
+`connectionRadius + (newMeshRadius - originalMeshRadius)`. For example, a native
+0.31 m connection radius with a 0.30 m mesh becomes 0.36 m for a requested 0.35 m
+mesh. Replacing it with 0.35 m would discard the vehicle's existing calibration
+and introduce a discontinuity at the default. No-change values remain exact.
+Tests cover both sides of that default and reject invalid/negative results.
+
+Native UpdateTires uses this radius for wheel roll and compression before deriving
+world contact/FX points. The adapter restores its temporary connection fields
+after the update; it does not edit physics radius, collision or saved native data.
+This math evidence does not replace live smoke/skid/suspension validation.
+
 ## Build
 
 Use CMake with an installed Visual Studio C++ toolchain and Windows SDK:
