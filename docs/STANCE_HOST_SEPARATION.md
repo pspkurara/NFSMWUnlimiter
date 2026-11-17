@@ -82,3 +82,14 @@ and frontend construction. The update adapter binds only an actual completed
 loading transition. Fixtures cover waiting, promotion and replacement with an
 identical unknown car. The original loader is at 9BA3A0, verified in native
 GetGarageCarLoader (7B41C0). Fresh-process My Cars runtime verification is pending.
+
+The user subsequently confirmed initial My Cars stance on the original install
+on 2026-11-18. An isolated unchanged-dependency test copy is prepared by
+tools/prepare_stance_validation.ps1. It requires the preserved Unlimiter SHA256
+d1f7516bbf67bc78563e938515a10cf7c0e1c1654406ef1b6eab9ef3c7ba54c9, copies
+scripts/MEMCARD/SAVE privately, checks WidescreenFix's SAVE and file-settings
+redirection, and shares only an explicit list of asset directories through
+junctions. It writes a hash manifest and never launches the game. The first
+prepared copy omits the optional camera to test stance without that dependency.
+Its runtime startup/menu/save/race validation remains pending while the user
+tests the original game. No unchanged-dependency compatibility claim is made yet.
