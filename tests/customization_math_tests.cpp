@@ -76,6 +76,21 @@ int main() {
         near(determinant(changed),reflection);
         for(int i=0;i<3;++i)for(int j=0;j<3;++j)near(changed.m[i][j],nativeRoot.m[i][j]);
     }
+    // Light markers must agree with body geometry after native flare rendering
+    // overwrites translation. Cover nonzero origin and a banked vehicle so a
+    // world-Z-only offset or double-added world position cannot pass.
+    auto bank=Identity();bank.m[1][1]=0;bank.m[1][2]=1;bank.m[2][1]=-1;bank.m[2][2]=0;
+    bank.m[3][0]=900;bank.m[3][1]=900;bank.m[3][2]=900; // ignored separate pose
+    const float origin[]={100,200,3};
+    const auto effect=BodyEffectPose(HeightTransform(1.5f,-1.5f,-.2f,-.2f),bank,origin);
+    near(effect.m[3][0],100);near(effect.m[3][1],200.2f);near(effect.m[3][2],3);
+    auto native=effect;
+    for(unsigned i=0;i<3;++i)native.m[3][i]=effect.m[3][i];
+    // A marker one metre above local origin follows the banked up direction.
+    near(native.m[2][0]+native.m[3][0],100);
+    near(native.m[2][1]+native.m[3][1],199.2f);
+    near(native.m[2][2]+native.m[3][2],3);
+    near(bank.m[3][0],900); // original input is never mutated
     root.m[0][0]=NAN;if(AffineInverse(root,inverse))return 3;
     root=Identity();root.m[2][2]=1e-12f;if(AffineInverse(root,inverse))return 4;
     root=Identity();root.m[1][3]=.1f;if(AffineInverse(root,inverse))return 5;

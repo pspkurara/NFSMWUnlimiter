@@ -135,6 +135,62 @@ static Context CarContext(DWORD* car) {
     if(!context.rearWheel)context.rearWheel=context.frontWheel;
     return context;
 }
+static bool BodyEffectHeight(DWORD* car,Matrix& delta) {
+    if(!Ready()||!enabled()||!car||!car[33]||!car[34])return false;
+    const auto context=CarContext(car);
+    const float front=Value(context,0,0,0.f),rear=Value(context,1,0,0.f);
+    if(!std::isfinite(front)||!std::isfinite(rear)||std::fabs(front)>2.f||std::fabs(rear)>2.f||
+       (front==0.f&&rear==0.f))return false;
+    const auto attributes=reinterpret_cast<const float*>(car[1517]);
+    delta=CustomizationMath::HeightTransform(attributes?attributes[4]:0.f,attributes?attributes[12]:0.f,front,rear);
+    return true;
+}
+using FlaresFn=void(__thiscall*)(DWORD*,void*,const float*,const Matrix*,int,int,int);
+using BodyEffectsFn=void(__thiscall*)(DWORD*,const void*,float);
+static FlaresFn originalFlares=nullptr;
+static BodyEffectsFn originalBodyEffects=nullptr;
+static void __fastcall Flares(DWORD* car,void*,void* view,const float* position,const Matrix* body,
+    int light,int reflection,int flags) {
+    Matrix delta;
+    if(!body||!position||!BodyEffectHeight(car,delta)) {
+        originalFlares(car,view,position,body,light,reflection,flags);return;
+    }
+    // The native flare path replaces the matrix translation with position.
+    // Adjust both arguments consistently; changing only body loses the height.
+    const Matrix adjusted=CustomizationMath::BodyEffectPose(delta,*body,position);
+    originalFlares(car,view,adjusted.m[3],&adjusted,light,reflection,flags);
+}
+static void __fastcall BodyEffects(DWORD* connection,void*,const void* data,float dt) {
+    Matrix delta;
+    if(!BodyEffectHeight(reinterpret_cast<DWORD*>(connection[0x44/4]),delta)) {
+        originalBodyEffects(connection,data,dt);return;
+    }
+    // Only exhaust/engine emitters consume this scoped render pose. TireState
+    // UpdateTires/DoFX/DoSkids run outside it and keep their contact coordinates.
+    auto matrix=reinterpret_cast<Matrix*>(reinterpret_cast<BYTE*>(connection)+0x330);
+    const Matrix saved=*matrix;
+    *matrix=CustomizationMath::Multiply(delta,saved);
+    originalBodyEffects(connection,data,dt);
+    *matrix=saved;
+}
+static bool InstallBodyEffects() {
+    const BYTE flares[]={0x55,0x8B,0xEC,0x83,0xE4,0xF0,0x83,0xEC,0x74};
+    const BYTE effects[]={0x83,0xEC,0x14,0xD9,0x05,0x60,0x22,0x8F,0};
+    const BYTE pose[]={0x8B,0x44,0x24,0x04,0x81,0xC1,0x30,0x03,0,0};
+    if(!Bytes(0x742950,flares,sizeof(flares))||!Bytes(0x7561C0,effects,sizeof(effects))||
+       !Bytes(0x739400,pose,sizeof(pose)))return false;
+    struct Hook {uintptr_t address;void* target;void** original;};
+    const Hook hooks[]={{0x742950,&Flares,reinterpret_cast<void**>(&originalFlares)},
+        {0x7561C0,&BodyEffects,reinterpret_cast<void**>(&originalBodyEffects)}};
+    size_t created=0;bool ok=true;
+    for(const auto& hook:hooks) {
+        if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.target,hook.original)!=MH_OK){ok=false;break;}
+        ++created;
+    }
+    if(ok)for(const auto& hook:hooks)if(MH_EnableHook(reinterpret_cast<void*>(hook.address))!=MH_OK){ok=false;break;}
+    if(!ok)for(size_t i=0;i<created;++i){MH_DisableHook(reinterpret_cast<void*>(hooks[i].address));MH_RemoveHook(reinterpret_cast<void*>(hooks[i].address));}
+    return ok;
+}
 struct TireEffects {DWORD* connection;float skidScale[4]{1,1,1,1};};
 static thread_local TireEffects* activeEffects=nullptr;
 using UpdateTiresFn=void(__thiscall*)(DWORD*,float,float,const void*);
@@ -456,6 +512,8 @@ bool Install() {
     }
     Log(InstallTireEffects()?"Race tire matrices, contact FX and proportional skid width hooks installed.":
         "Race tire effects disabled: unknown layout or competing hooks.");
+    Log(InstallBodyEffects()?"Body-mounted flare, exhaust and engine effect height hooks installed.":
+        "Body-mounted effect height hooks disabled: unknown layout or competing hooks.");
     Log("Stance bridge installed for PC 1.3, Unlimiter 3.3.1.1338.");return true;
 }
 } // namespace CustomizationBridge

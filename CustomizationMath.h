@@ -16,6 +16,13 @@ inline Matrix Multiply(const Matrix& a,const Matrix& b) {
         for(int k=0;k<4;++k) r.m[i][j]+=a.m[i][k]*b.m[k][j];
     return r;
 }
+inline Matrix BodyEffectPose(const Matrix& delta,const Matrix& body,const float* position) {
+    // Flare rendering supplies world translation separately and overwrites the
+    // matrix's last row. Compose once and pass its translation back as well.
+    Matrix world=body;
+    for(unsigned i=0;i<3;++i)world.m[3][i]=position[i];
+    return Multiply(delta,world);
+}
 inline bool SamePose(const Matrix& a,const Matrix& b) {
     // Conservative boundary check, not a general approximate matrix equality:
     // a moved/damaged panel must not use a rigid, calibrated fender plane.

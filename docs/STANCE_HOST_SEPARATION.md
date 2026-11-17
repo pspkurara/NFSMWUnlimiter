@@ -64,3 +64,13 @@ above ground. Body markers need the same body transform, including front/rear
 rake. Ground/contact effects must retain the final native/Unlimiter contact data;
 do not add body height a second time. Inspect existing radius/contact compensation
 before changing tires, smoke or skid positions, and verify emitter ownership.
+
+Original-process inspection confirmed native, unclaimed entry bytes for
+CarRenderInfo::RenderFlaresOnCar (742950) and CarRenderConn::UpdateEffects
+(7561C0), and the PC render matrix at connection+330 via GetRenderMatrix
+(739400). The bridge now adjusts flare matrix and separate position together,
+and temporarily adjusts only the exhaust/engine UpdateEffects pose. Both use
+the same local height/rake transform as the body. Tire/contact processing stays
+outside this scope. A banked-world/nonzero-origin fixture covers the flare pose.
+Live FX alignment remains unverified; this does not establish coverage of every
+other body effect, such as separately generated contrails or headlight history.
