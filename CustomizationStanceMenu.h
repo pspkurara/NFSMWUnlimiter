@@ -31,8 +31,14 @@ static Session EditSession;
 static std::array<DWORD*,7> Sliders{};
 static bool RefreshPending=false;
 static void Refresh();
+static bool Inspecting=false,InspectHeld=false;
+struct HiddenWidget {DWORD* object;unsigned visibility;};
+static std::vector<HiddenWidget> HiddenWidgets;
+static void SetInspection(bool enabled);
 static bool ResetDialogAvailable=false;
-static unsigned ResetConfirmed=0,ResetDismissed=0,ResetAxle=0;
+static unsigned ResetConfirmed=0,ResetAll=0,ResetDismissed=0,ResetAxle=0;
+static unsigned ResetSelectedLabel=0,ResetAllLabel=0;
+static std::array<DWORD*,2> ResetLabels{};
 static int ResetChannel=-1;
 static uint64_t ResetOwner=0;
 struct SavedText {DWORD* object;unsigned name,language,flags;std::wstring text;};
@@ -173,6 +179,18 @@ static void Tick() {
         Cancel();Opening=false;CustomizationSave::Log("Stance menu open timed out; lease released.");
     }
     if(Screen&&!Closing&&!Current()){Cancel();Leave();}
+    if(Screen&&!Closing&&ResetChannel<0) {
+        DWORD foreground=0;GetWindowThreadProcessId(GetForegroundWindow(),&foreground);
+        bool held=false;
+        if(foreground==GetCurrentProcessId()) {
+            held=(GetAsyncKeyState(VK_SPACE)&0x8000)!=0;
+            XINPUT_STATE pad{};
+            if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS)
+                held|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
+        }
+        if(held&&!InspectHeld)SetInspection(!Inspecting);
+        InspectHeld=held;
+    }
     // Setup runs inside the native constructor, before the package's initial
     // scripts and widget positioning finish. Draw saved values again after
     // that lifecycle boundary; asset defaults must not become the visible state.
@@ -186,6 +204,37 @@ static int SliderIndex(DWORD* slider) {
 }
 static void Text(unsigned hash,const char* text) {
     SetText(FEngFindObject(Package,hash),text);
+}
+static void Footer() {
+    auto group=FEngFindObject(Package,bStringHash("HELP_BUTTON"));
+    if(!group||group[0x18/4]!=5||group[0x60/4]>32)return;
+    // Work within the visible help group: the template contains another group
+    // with the same name, and its string hashes are not the visible shadow pair.
+    std::array<DWORD*,2> labels{};unsigned count=0;
+    auto child=reinterpret_cast<DWORD*>(group[0x64/4]);
+    for(unsigned i=0;i<group[0x60/4]&&child;++i,child=reinterpret_cast<DWORD*>(child[1])) {
+        if(child[0]==0x89B05C&&child!=ResetLabels[0]&&child!=ResetLabels[1]&&count<2)labels[count++]=child;
+    }
+    for(unsigned i=0;i<count;++i) {
+        SetText(labels[i],Inspecting?"Return":"Copy");
+        if(!ResetLabels[i]) {
+            ResetLabels[i]=FEngFindObject(Package,bStringHash(i?"MWCL_RESET_SHADOW":"MWCL_RESET_LABEL"));
+        }
+        if(!ResetLabels[i]) {
+            auto clone=(*reinterpret_cast<DWORD*(__thiscall**)(DWORD*,bool)>(labels[i][0]+4))(labels[i],false);
+            if(!clone)continue;
+            clone[0x10/4]=bStringHash(i?"MWCL_RESET_SHADOW":"MWCL_RESET_LABEL");
+            clone[0x58/4]=0; // Render cache belongs to the source, never the clone.
+            FEMinList_AddNode(group+0x5C/4,reinterpret_cast<DWORD*>(group[0x68/4]),clone);
+            ResetLabels[i]=clone;
+        }
+        auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);
+        if(data&&labels[i][0x30/4]>=0x44) {
+            float position[]={data[7]-130.f,data[8],data[9]};
+            reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(ResetLabels[i],position,false);
+        }
+        SetText(ResetLabels[i],Inspecting?"":"X: Reset",false);
+    }
 }
 static void Heading(const char* error=nullptr) {
     const char* modes[]={"BOTH","FRONT","REAR"};
@@ -209,10 +258,35 @@ static void Heading(const char* error=nullptr) {
     Text(bStringHash("HEADER_TEXT_SHADOW"),error?error:caption);
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
-    Text(0x2FBBF8E8,"Copy");Text(0x55FA05C3,"Copy");
-    Text(0x05CDDED4,"A: add to cart   LT/RT: axle   X: reset/help   Shift: fine   Ctrl: fast");
+    Footer();
+    Text(0x05CDDED4,Inspecting?"R3 / Space / B: Return to stance adjustment":"R3 / Space: Showcase   A: cart   LT/RT: axle   Shift: fine   Ctrl: fast");
+}
+static void SetInspection(bool enabled) {
+    if(enabled==Inspecting)return;
+    Inspecting=enabled;
+    if(enabled) {
+        const auto hide=[](DWORD* object) {
+            if(!object)return;
+            for(const auto& saved:HiddenWidgets)if(saved.object==object)return;
+            HiddenWidgets.push_back({object,object[0x1C/4]&3u});FEngSetInvisible(object);
+        };
+        for(auto slider:Sliders)if(slider) {
+            hide(reinterpret_cast<DWORD*>(slider[0x2C/4]));
+            hide(reinterpret_cast<DWORD*>(slider[0x30/4]));
+            hide(reinterpret_cast<DWORD*>(slider[0x5C/4]));
+        }
+        hide(FEngFindObject(Package,bStringHash("HEADER_TEXT_MAIN")));
+        hide(FEngFindObject(Package,bStringHash("HEADER_TEXT_SHADOW")));
+    } else {
+        for(const auto& saved:HiddenWidgets) {
+            saved.object[0x1C/4]=(saved.object[0x1C/4]&~3u)|saved.visibility|0x02400000u;
+        }
+        HiddenWidgets.clear();RefreshPending=true;
+    }
+    Heading();
 }
 static void __fastcall Draw(DWORD* slider,void*) {
+    if(Screen&&Inspecting&&SliderIndex(slider)>=0)return;
     const int index=SliderIndex(slider);
     if(Screen&&index>=0) {
         Remember(reinterpret_cast<DWORD*>(slider[0x2C/4]));
@@ -263,16 +337,16 @@ static void ShowResetHelp(unsigned channel) {
     if(!ResetDialogAvailable){Heading("Native reset dialog unavailable; no value changed.");return;}
     const char* axles[]={"front and rear","front","rear"};
     char text[512]{};
-    sprintf_s(text,"Reset %s (%s) to its inherited vehicle/preset value?\n\n"
-        "Only this parameter and axle selection change. This is a preview; A adds it to the cart, and shop checkout purchases it.\n\n"
+    sprintf_s(text,"Reset selected: %s (%s). Reset all: all parameters, both axles.\n"
+        "Restore inherited vehicle/preset values. This is a preview; A adds it to the cart, and shop checkout purchases it.\n\n"
         "LT/RT: select axle. Y: copy to opposite axle. RB/Shift: fine. LB/Ctrl: fast. B: cancel the edit.",
         Labels[channel],axles[EditSession.axle]);
     ResetChannel=int(channel);ResetAxle=EditSession.axle;ResetOwner=Owner;
     // The native helper chooses Dialog.fng in the frontend and owns focus/input.
     // Its last argument is a printf format; pass text as data, never as the format.
-    using DialogFn=int(__cdecl*)(const char*,const char*,int,unsigned,unsigned,unsigned,unsigned,unsigned,int,const char*,...);
-    reinterpret_cast<DialogFn>(0x598BB0)(Package,"",3,0x70E01038,0x417B25E4,
-        ResetConfirmed,ResetDismissed,ResetDismissed,1,"%s",text);
+    using DialogFn=int(__cdecl*)(const char*,const char*,int,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,int,const char*,...);
+    reinterpret_cast<DialogFn>(0x598F50)(Package,"",3,ResetSelectedLabel,ResetAllLabel,ResetDismissed,
+        ResetConfirmed,ResetAll,ResetDismissed,ResetDismissed,2,"%s",text);
 }
 static void __fastcall Act(DWORD* slider,void*,const char* package,unsigned message) {
     const int index=SliderIndex(slider);
@@ -306,11 +380,16 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(Closing)return;
     if(!Current()){Cancel();Leave();return;}
-    if(message==ResetConfirmed||message==ResetDismissed) {
+    if(Inspecting) {
+        if(message==Back||message==Accept||message==Copy)SetInspection(false);
+        return;
+    }
+    if(message==ResetConfirmed||message==ResetAll||message==ResetDismissed) {
         const int channel=ResetChannel;const auto axle=ResetAxle;const auto owner=ResetOwner;
         ResetChannel=-1;ResetOwner=0;
-        if(message==ResetConfirmed&&owner==Owner&&channel>=0&&channel<6) {
-            EditSession.SelectAxle(axle);EditSession.Inherit(unsigned(channel));
+        if((message==ResetConfirmed||message==ResetAll)&&owner==Owner&&channel>=0&&channel<6) {
+            if(message==ResetAll)EditSession.InheritAll();
+            else {EditSession.SelectAxle(axle);EditSession.Inherit(unsigned(channel));}
             if(Preview())Refresh();
         } else RefreshPending=true;
         return;
@@ -387,8 +466,10 @@ static DWORD* __cdecl Factory(DWORD* data) {
 }
 static void __fastcall Destructor(DWORD* screen,void*) {
     if(screen==Screen) {
+        SetInspection(false);InspectHeld=false;
         if(!Finished)Cancel();RestoreText();Screen=nullptr;Sliders.fill(nullptr);Owner=0;Opening=false;Closing=false;RefreshPending=false;
         ResetChannel=-1;ResetOwner=0;
+        ResetLabels={};
     }
     OriginalDestructor(screen);
 }
@@ -411,6 +492,9 @@ static void __fastcall React(DWORD* option,void*,const char* parent,unsigned mes
 static void __cdecl Language(DWORD* object,unsigned hash) {
     OriginalLanguage(object,hash);
     if(object&&hash==NameHash)SetText(object,"Stance adjustment",false);
+    if(object&&hash==ResetSelectedLabel)SetText(object,"Reset selected",false);
+    if(object&&hash==ResetAllLabel)SetText(object,"Reset all",false);
+    if(object&&hash==ResetDismissed)SetText(object,"Cancel",false);
 }
 static DWORD* __cdecl CreateScreen(DWORD* package,unsigned args) {
     CustomizationSave::Log("Independent stance screen factory selected.");
@@ -486,8 +570,10 @@ static bool Install() {
     }
     NameHash=bStringHash("MWCL_STANCE_ADJUSTMENT");PackageHash=0xFFFFFFFF;
     ResetConfirmed=bStringHash("MWCL_STANCE_RESET_CONFIRMED");ResetDismissed=bStringHash("MWCL_STANCE_RESET_DISMISSED");
-    const BYTE dialogEntry[]={0x8B,0x4C,0x24,0x28,0x8B,0x54,0x24,0x24,0x8D,0x44,0x24,0x2C};
-    ResetDialogAvailable=std::memcmp(reinterpret_cast<const void*>(0x598BB0),dialogEntry,sizeof(dialogEntry))==0;
+    ResetAll=bStringHash("MWCL_STANCE_RESET_ALL");
+    ResetSelectedLabel=bStringHash("MWCL_STANCE_RESET_SELECTED_LABEL");ResetAllLabel=bStringHash("MWCL_STANCE_RESET_ALL_LABEL");
+    const BYTE dialogEntry[]={0x8B,0x4C,0x24,0x30,0x8B,0x54,0x24,0x2C,0x8D,0x44,0x24,0x34};
+    ResetDialogAvailable=std::memcmp(reinterpret_cast<const void*>(0x598F50),dialogEntry,sizeof(dialogEntry))==0;
     for(const unsigned char* c=reinterpret_cast<const unsigned char*>(Package);*c;++c)PackageHash=PackageHash*33+std::toupper(*c);
     size_t created=0;bool ok=true;
     for(const auto& hook:hooks){if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.replacement,hook.original)!=MH_OK){ok=false;break;}++created;}

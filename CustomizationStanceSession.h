@@ -45,6 +45,7 @@ struct Session {
         active.values[target]=Value(c,source);active.mask|=1u<<target;return true;
     }
     void Inherit(unsigned c) {if(c<6)for(unsigned a=0;a<2;++a)if(Includes(a))active.mask&=~(1u<<(c*2+a));}
+    void InheritAll() {active.mask=0;} // Preserve editor selection and global Enabled.
     bool Dirty() const {
         if(enabled!=(info.enabled!=0)||before.mask!=active.mask)return true;
         for(unsigned i=0;i<12;++i)if((active.mask&(1u<<i))&&active.values[i]!=before.values[i])return true;

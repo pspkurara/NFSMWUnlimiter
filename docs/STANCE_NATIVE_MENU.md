@@ -3,7 +3,8 @@
 Status: native entry, height preview, cart insertion and reopening absolute values
 were confirmed in the test copy. Autosave and race transfer are awaiting the
 latest fixes' live checks. Reset/help confirmation is implemented in source and
-has not yet been visually checked.
+has not yet been visually checked. The footer/inspection refinements below also
+await a live check; passing tests do not verify their layout.
 Do not treat successful builds or unit tests as in-game compatibility evidence.
 
 ## Entry and assets
@@ -16,6 +17,21 @@ Garage remapping must be enabled with `[Garage] Enabled=1, PartsOnly=0`; the
 existing deadzone/inversion settings remain in charge. Other packages retain
 their original metadata. An unknown/occupied camera hook disables this optional
 view only. Actual orbit/mouse behavior still requires live validation.
+
+R3 (right-stick click) or Space toggles an in-place Showcase inspection view:
+slider groups and the heading are hidden while the same preview/session remains
+active. R3/Space, B, A or Y returns to adjustment without queuing or purchasing
+anything. This does not switch to the stock Showcase package or rebuild the car.
+The footer advertises the shortcut. Inputs are polled only while this editor is
+active and the game has foreground focus; a reset dialog blocks the shortcut.
+
+The visible Y help-group strings are relabelled **Copy**, including their
+shadow. An adjacent **X: Reset** hint is cloned from those installed strings,
+owned by their native parent list, and never added to the stock tuning package.
+X opens a native three-button dialog: **Reset selected**, **Reset all**, and
+**Cancel** (initial selection). Selected reset affects the selected axle scope;
+reset all restores inherited values for all six channels on both axles. Neither
+changes global Enabled or bypasses preview/cart/checkout persistence.
 
 One `Stance adjustment` entry is added under the existing body/parts shop for
 owned career/My Cars records. No top-level shop or part-database asset is added.

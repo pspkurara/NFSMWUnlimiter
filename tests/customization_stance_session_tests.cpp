@@ -29,6 +29,8 @@ int main() {
     if(s.CopyToOther(4)||std::memcmp(&noCopy,&s.active,sizeof(noCopy)))return 17;
     s.Begin(info,values);s.SelectAxle(1);
     if(!s.CopyToOther(0)||s.Value(0,0)!=20||s.Value(0,1)!=20||s.Value(1,1)!=2)return 18;
+    s.enabled=true;s.SelectAxle(2);s.Step(1,1);s.InheritAll();
+    if(s.active.mask||s.axle!=2||!s.enabled||s.Value(0,0)!=1||s.Value(1,1)!=2)return 19;
     info.step[0]=0;if(s.Begin(info,{}))return 8;
     std::cout<<"Native stance session: inheritance, linked deltas, ranges and grouped changes passed\n";
     return 0;
