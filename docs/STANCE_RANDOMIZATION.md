@@ -28,7 +28,9 @@ The verified PC transitions are:
 2. CarViewer::SetRideInfo (7A9DB0) copies to static RideInfo 9BA088 before frontend
    construction. Carry that exact source copy, then the loaded/frontend copies.
 3. FECustomizationRecord::WriteRideIntoRecord (56F2F0): carry it into that record.
-4. Native customization deep copy (689361): carry it into the race copy.
+4. Earlier customization copies in QuickGame::CreateCars (6F4A16) and player setup
+   (741725), followed by the PVehicle deep copy (689361): carry it through each
+   observed intermediate record into the race copy.
 5. WriteRecordIntoRide (56F2B0) and race render-connection load: bind the selection
    back to the resulting ride instance.
 

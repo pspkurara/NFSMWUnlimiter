@@ -519,6 +519,20 @@ static void __cdecl TrackCustomizationCopy(const void* source,void* destination)
     } catch(...) {Log("Customization copy lineage unavailable; native copy retained.");}
 }
 static void* OriginalCustomizationCopy=nullptr;
+static void* OriginalQuickGameCopy=nullptr;
+static void* OriginalPlayerSetupCopy=nullptr;
+// These earlier native copies already have EDI set to the destination. The
+// PVehicle allocation cave below instead receives its destination in EAX.
+#define MWCL_CUSTOMIZATION_EDI_CAVE(name,original) \
+    static void __declspec(naked) name() { \
+        __asm { pushfd } __asm { pushad } \
+        __asm { push edi } __asm { push esi } \
+        __asm { call TrackCustomizationCopy } __asm { add esp,8 } \
+        __asm { popad } __asm { popfd } __asm { jmp dword ptr [original] } \
+    }
+MWCL_CUSTOMIZATION_EDI_CAVE(QuickGameCopyCave,OriginalQuickGameCopy)
+MWCL_CUSTOMIZATION_EDI_CAVE(PlayerSetupCopyCave,OriginalPlayerSetupCopy)
+#undef MWCL_CUSTOMIZATION_EDI_CAVE
 static void __declspec(naked) CustomizationCopyCave() {
     __asm {
         // PVehicle's verified 0x198-byte deep copy: ESI source, EAX allocation.
@@ -596,6 +610,8 @@ static bool Install() {
         {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}},
         {0x75D1A0,&SetupLoading,reinterpret_cast<void**>(&OriginalSetupLoading),{0x64,0xA1,0,0,0,0}},
         {0x689361,&CustomizationCopyCave,&OriginalCustomizationCopy,{0xB9,0x66,0,0,0,0x8B,0xF8,0xF3,0xA5}},
+        {0x6F4A16,&QuickGameCopyCave,&OriginalQuickGameCopy,{0xF3,0xA5,0x89,0x44,0x24,0x70}},
+        {0x741725,&PlayerSetupCopyCave,&OriginalPlayerSetupCopy,{0xF3,0xA5,0x8B,0x7C,0x24,0x18}},
         {0x7A9DB0,&SetViewerRide,reinterpret_cast<void**>(&OriginalSetViewerRide),{0x8B,0x0D,0xDC,0xCA,0x91,0}},
         {0x7609B0,&ReInit,reinterpret_cast<void**>(&OriginalReInit),{0x64,0xA1,0,0,0,0}},
         {0x752D20,&LoadedRide,reinterpret_cast<void**>(&OriginalLoadedRide),{0x8B,0x44,0x24,0x0C,0x53,0x55}}

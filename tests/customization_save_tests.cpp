@@ -69,6 +69,26 @@ static void __declspec(naked) NativeCustomizationCopyFixture() {
         ret }
 }
 static std::vector<DWORD> raceLoaded(0x310/4);
+static void __declspec(naked) NativeEdiCustomizationCopyFixture() {
+    __asm { rep movsd }
+    __asm { ret }
+}
+static DWORD RunEdiCustomizationCopy(void* cave,const void* source,void* destination) {
+    DWORD result=0;
+    __asm {
+        push esi
+        push edi
+        mov esi,source
+        mov edi,destination
+        mov ecx,66h
+        mov eax,0C001CAFEh
+        call cave
+        mov result,eax
+        pop edi
+        pop esi
+    }
+    return result;
+}
 static void __fastcall SynchronousSetupLoading(DWORD* connection,void*,bool) {
     auto source=reinterpret_cast<DWORD*>(connection[0x40/4]);
     std::memcpy(raceLoaded.data(),source,0x310);
@@ -271,6 +291,25 @@ int main() {
     }
     Check(std::memcmp(customization,copied.data(),copied.size())==0,"copy cave preserves native source/destination registers and 0x198-byte deep copy");
     Check(BindRaceCustomization(ai.data(),copied.data(),0),"observed native deep copy preserves exact owned lineage");
+    // QuickGame creates a stack record before the PVehicle allocation. An
+    // unobserved first copy was the missing link in the live My Cars race.
+    OriginalQuickGameCopy=OriginalPlayerSetupCopy=reinterpret_cast<void*>(&NativeEdiCustomizationCopyFixture);
+    std::array<BYTE,0x198> stackRecord{},unknownRecord{};
+    std::memcpy(unknownRecord.data(),customization,unknownRecord.size());
+    for(auto cave:{reinterpret_cast<void*>(&QuickGameCopyCave),reinterpret_cast<void*>(&PlayerSetupCopyCave)}) {
+        Check(RunEdiCustomizationCopy(cave,customization,stackRecord.data())==0xC001CAFE,
+              "Earlier copy caves preserve EAX and native EDI destination convention");
+        Check(std::memcmp(customization,stackRecord.data(),stackRecord.size())==0,
+              "Earlier native copies retain all 408 customization bytes");
+        TrackCustomizationCopy(stackRecord.data(),copied.data());
+        Check(BindRaceCustomization(ai.data(),copied.data(),0)&&Resolve(ai.data(),0,2,0)==-2.5f,
+              "Owned record to QuickGame stack to PVehicle carries the purchased stance");
+        RunEdiCustomizationCopy(cave,unknownRecord.data(),stackRecord.data());
+        TrackCustomizationCopy(stackRecord.data(),copied.data());
+        Check(!BindRaceCustomization(ai.data(),copied.data(),0),
+              "Reusing the intermediate copy with unowned identical equipment clears lineage");
+    }
+    TrackCustomizationCopy(customization,copied.data());
     copied[0]^=1;
     Check(!BindRaceCustomization(ai.data(),copied.data(),0),"changed/reused customization copy loses old lineage");
     stable[5]=8;stable[8]=2;reinterpret_cast<BYTE*>(stable+5)[16]=1;

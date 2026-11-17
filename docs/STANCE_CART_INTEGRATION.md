@@ -145,3 +145,21 @@ results while always allowing native checkpoint cleanup. Previews and queued
 items cannot trigger this save request; no dummy part or native data mutation is
 used. The usual save flow on leaving My Cars / career shops can therefore include
 stance-only purchases. The latest save and Quick Race changes still require live QA.
+
+The live My Cars Quick Race diagnosis found an earlier missing copy: the player's
+408-byte PVehicle customization exactly matched the owned stable record, but its
+ownership provenance was absent. QuickGame::CreateCars first copies that record
+to a stack buffer at PC 6F4A16; player setup can also copy it into an embedded
+buffer at 741725. Observing only the later PVehicle allocation (689361) is too late.
+Both earlier copies now use the same checked copy observer, preserving their
+ESI/EDI calling convention and all native bytes. No equipment-match fallback is
+used. The shared observer also forwards transient random selections independently.
+Regression fixtures cover both intermediate copies, register preservation, the
+owned -> intermediate -> PVehicle chain, and an identical unowned replacement.
+
+The reconstructed CareerGame derives from QuickGame without overriding car
+creation. This supports a shared career/player path, but is not live PC coverage
+evidence. Career races/free roam, Quick Race, and randomized opponents still need
+separate runtime checks; passing a synthetic copy fixture cannot establish them.
+The latest live stance-only purchase did request the normal save flow and commit
+the owned-car sidecar after native SaveDone. Reload persistence still needs QA.
