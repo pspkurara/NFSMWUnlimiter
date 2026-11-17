@@ -69,7 +69,7 @@ static void __cdecl ForgetRecord(void* record) noexcept {
     std::lock_guard<std::mutex> lock(Mutex);Records.Erase(record);
 }
 using WriteFn=void(__thiscall*)(void*,DWORD*);
-static WriteFn OriginalRead=nullptr,OriginalWrite=nullptr;
+static WriteFn OriginalRead=nullptr;
 static void __fastcall ReadRecord(void* record,void*,DWORD* ride) {
     OriginalRead(record,ride);
     if(!ride)return;
@@ -81,8 +81,7 @@ static void __fastcall ReadRecord(void* record,void*,DWORD* ride) {
         if(entry)Rides.Put(ride,{CustomizationSave::Fingerprint(ride),entry->generation,entry->values});
     } catch(...) { Reset(); }
 }
-static void __fastcall WriteRecord(void* record,void*,DWORD* ride) {
-    OriginalWrite(record,ride);
+static void RecordWritten(void* record,DWORD* ride) {
     if(!record)return;
     try {
         const bool owned=CustomizationSave::IsOwnedCustomization(record);
@@ -117,7 +116,6 @@ static bool Install(bool randomPartsEnabled) {
     struct Hook {uintptr_t address;void* replacement;void** original;std::vector<unsigned char> bytes;};
     std::vector<Hook> hooks={
         {0x56F2B0,&ReadRecord,reinterpret_cast<void**>(&OriginalRead),{0x53,0x56,0x57,0x8B,0x7C,0x24,0x10}},
-        {0x56F2F0,&WriteRecord,reinterpret_cast<void**>(&OriginalWrite),{0x53,0x55,0x8B,0x6C,0x24,0x0C}},
         {0x739A70,&RideInit,&OriginalRideInit,{0x8B,0x44,0x24,4,0x8B,0xD1}},
         {0x7594A0,&RideStock,&OriginalRideStock,{0x83,0xEC,0x10,0x53,0x55,0x56}},
         {0x581C20,&RecordInit,&OriginalRecordInit,{0x8B,0xD1,0x33,0xC0,0x53,0x55}},
@@ -138,6 +136,7 @@ static bool Install(bool randomPartsEnabled) {
         CustomizationSave::TransientReset=&Reset;
         CustomizationSave::TransientRideCopy=&RideCopy;
         CustomizationSave::TransientRecordCopy=&RecordCopy;
+        CustomizationSave::TransientRecordWrite=&RecordWritten;
         HooksReady=true;RideInfoRandomObserver=&Randomized;
         CustomizationSave::Log("Random stance lifecycle installed; sampling follows random parts only.");return true;
     }

@@ -63,6 +63,8 @@ static std::map<Key,uint64_t> Tokens;
 static uint64_t NextToken = 1;
 static uint64_t ActiveEditorToken = 0;
 static std::string Profile, SavingProfile;
+struct StableCheckpoint {std::string profile;State purchased;};
+static std::optional<StableCheckpoint> CarStableSnapshot;
 // Event-only diagnostics: no per-frame file access.
 static void TraceShop(const char* event,uint64_t token,const Values& values) {
     char line[256]{};
@@ -78,6 +80,7 @@ static void(__cdecl* SetOwnedContext)(uint64_t,const Values*) = nullptr;
 static void(*TransientReset)() = nullptr;
 static void(*TransientRideCopy)(const DWORD*,DWORD*) = nullptr;
 static void(*TransientRecordCopy)(const void*,void*) = nullptr;
+static void(*TransientRecordWrite)(void*,DWORD*) = nullptr;
 
 static bool ValidValues(const Values& value) {
     if(value.size!=sizeof(Values) || (value.mask&~0xFFFu)) return false;
@@ -113,6 +116,7 @@ static void LoadLocked(const std::string& name) {
     Log("Stance state reset: native profile loaded or changed.");
     if(TransientReset)TransientReset();
     Profile=name; Pending.clear();Preview.clear();Shop.Clear();Rides.clear();CustomizationCopies.clear();Tokens.clear();ActiveEditorToken=0;
+    CarStableSnapshot.reset();
     Saving.clear();SaveCaptured=false;SavingProfile.clear();
     try {
         auto directory=ProfileDirectory(name); if(directory.empty()) return;
@@ -150,6 +154,39 @@ static void EnsureProfileLocked() {
 }
 static void SynchronizeProfile() {
     std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+}
+static bool SamePurchased(const State& a,const State& b) {
+    if(a.size()!=b.size())return false;
+    auto other=b.begin();
+    for(const auto& entry:a) {
+        if(!(entry.first==other->first)||entry.second.mask!=other->second.mask)return false;
+        for(unsigned i=0;i<12;++i)if((entry.second.mask&(1u<<i))&&entry.second.values[i]!=other->second.values[i])return false;
+        ++other;
+    }
+    return true;
+}
+using StableBackupFn=void(__thiscall*)(DWORD*);
+using StableDirtyFn=bool(__thiscall*)(DWORD*);
+static StableBackupFn OriginalStableBackup=nullptr;
+static StableDirtyFn OriginalStableDirty=nullptr;
+static void __fastcall BackupCarStable(DWORD* database,void*) {
+    const bool first=database[0x124/4]==0;
+    OriginalStableBackup(database);
+    if(!first||!database[0x124/4]||database!=*reinterpret_cast<DWORD**>(GlobalAddress(0x91CF90)))return;
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    CarStableSnapshot=StableCheckpoint{Profile,Pending};
+}
+static bool __fastcall IsCarStableDirty(DWORD* database,void*) {
+    // The native query consumes/frees its checkpoint even when we changed only
+    // extension data. Always call it, and never mutate native save bytes to dirty it.
+    const bool native=OriginalStableDirty(database);
+    if(database!=*reinterpret_cast<DWORD**>(GlobalAddress(0x91CF90)))return native;
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    const bool stance=CarStableSnapshot&&CarStableSnapshot->profile==Profile&&
+        !SamePurchased(CarStableSnapshot->purchased,Pending);
+    CarStableSnapshot.reset();
+    if(stance)Log("Purchased stance requested the normal native shop save flow.");
+    return native||stance;
 }
 static uint64_t Fingerprint(const DWORD* ride) {
     uint64_t hash=14695981039346656037ull;
@@ -361,6 +398,7 @@ static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t
     auto backup=Backups.find(buffer);
     if(!native&&backup!=Backups.end()&&backup->second.profile==name) {
         if(TransientReset)TransientReset();
+        if(Profile!=name)CarStableSnapshot.reset();
         Profile=name;Pending=backup->second.pending;Preview.clear();Shop.Clear();Tokens.clear();Rides.clear();CustomizationCopies.clear();
         Log("Stance state reset: native memory snapshot restored.");
     } else {LoadLocked(name);Backups.clear();}
@@ -432,7 +470,7 @@ static bool CustomizationOwnerLocked(const void* customization,Key& owner) {
                 owner=candidate;found=true;
             }
         }
-        return found;
+        if(found)return true;
     }
     auto copy=CustomizationCopies.find(customization);
     if(copy==CustomizationCopies.end()||!CurrentKey(copy->second.key)||
@@ -442,6 +480,27 @@ static bool CustomizationOwnerLocked(const void* customization,Key& owner) {
 static bool IsOwnedCustomization(const void* record) {
     std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
     Key owner{};return CustomizationOwnerLocked(record,owner);
+}
+using WriteRecordFn=void(__thiscall*)(void*,DWORD*);
+static WriteRecordFn OriginalWriteRecord=nullptr;
+static void __fastcall WriteRecord(void* record,void*,DWORD* ride) {
+    OriginalWriteRecord(record,ride);
+    if(!record)return;
+    try {
+        std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+        CustomizationCopies.erase(record);
+        Key owner{},destination{};
+        // Quick Race's reserved debug record is not an owned garage entry.
+        // Its lineage is supplied by the exact owned CarViewer RideInfo written
+        // into it, never by comparing equipment or the currently selected car.
+        if(IdentityLocked(ride,owner,false)&&!CustomizationOwnerLocked(record,destination)) {
+            if(CustomizationCopies.size()>512)CustomizationCopies.clear();
+            CustomizationCopies[record]={owner,CustomizationFingerprint(record)};
+            Log("Owned stance lineage carried through native RideInfo-to-record conversion.");
+        }
+    } catch(...) {Log("Owned RideInfo-to-record lineage unavailable; native conversion retained.");}
+    // Random stance subscribes to this conversion without owning a second hook.
+    if(TransientRecordWrite)TransientRecordWrite(record,ride);
 }
 static void __cdecl TrackCustomizationCopy(const void* source,void* destination) noexcept {
     try {
@@ -527,6 +586,9 @@ static bool Install() {
     std::vector<Hook> hooks={
         {0x5910E0,&Build,reinterpret_cast<void**>(&OriginalBuild),{0x8B,0x54,0x24,4,0x53,0x57}},
         {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}},
+        {0x57FC50,&BackupCarStable,reinterpret_cast<void**>(&OriginalStableBackup),{0x56,0x8B,0xF1,0x8B,0x86,0x24,1,0,0}},
+        {0x57FC90,&IsCarStableDirty,reinterpret_cast<void**>(&OriginalStableDirty),{0x56,0x8B,0xF1,0x8B,0x86,0x24,1,0,0}},
+        {0x56F2F0,&WriteRecord,reinterpret_cast<void**>(&OriginalWriteRecord),{0x53,0x55,0x8B,0x6C,0x24,0x0C}},
         {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}},
         {0x75D1A0,&SetupLoading,reinterpret_cast<void**>(&OriginalSetupLoading),{0x64,0xA1,0,0,0,0}},
         {0x689361,&CustomizationCopyCave,&OriginalCustomizationCopy,{0xB9,0x66,0,0,0,0x8B,0xF8,0xF3,0xA5}},

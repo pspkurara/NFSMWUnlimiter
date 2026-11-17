@@ -128,3 +128,16 @@ Race ownership must be established before VehicleRenderConn::SetupLoading
 RideInfo into the loader. A scoped load context binds the exact owned native
 customization before that copy. A regression fixture resolves purchased values
 from the first synchronous loader copy; actual race rendering still needs QA.
+
+Quick Race first writes CarViewer's selected RideInfo into its reserved debug
+customization record (uiQRBrief exit). The profile host now owns WriteRideIntoRecord
+(56F2F0), records that observed owned-car lineage, and lets the optional random
+adapter observe the same completed conversion. An unowned replacement invalidates
+the alias; matching equipment alone cannot inherit another car's saved stance.
+
+Native IsCarStableDirty (57FC90) compares only the native car-stable backup. A
+stance-only purchase leaves those bytes unchanged, so the host also compares
+purchased extension values against BackupCarStable (57FC50). It combines the
+results while always allowing native checkpoint cleanup. Previews and queued
+items cannot trigger this save request; no dummy part or native data mutation is
+used. This restores the usual save flow on leaving My Cars / career shops.

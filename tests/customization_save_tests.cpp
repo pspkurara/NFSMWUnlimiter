@@ -77,6 +77,15 @@ static void __fastcall SynchronousSetupLoading(DWORD* connection,void*,bool) {
 static bool __fastcall SynchronousRaceLoad(DWORD* connection,void*,unsigned,int,bool commit,const void*) {
     SetupLoading(connection,nullptr,commit);return true;
 }
+static bool nativeStableDirty=false;
+static int nativeStableQueries=0;
+static void __fastcall NativeStableBackup(DWORD* database,void*) {database[0x124/4]=1;}
+static bool __fastcall NativeStableDirty(DWORD* database,void*) {
+    ++nativeStableQueries;database[0x124/4]=0;return nativeStableDirty;
+}
+static void __fastcall NativeWriteRecord(void* record,void*,DWORD* ride) {
+    std::memcpy(record,ride,sizeof(DWORD));
+}
 int main() {
     directory=fs::current_path()/("save-fixture-"+std::to_string(GetCurrentProcessId()));
     fs::create_directories(directory/"NFS Most Wanted"/"Alpha");
@@ -88,7 +97,7 @@ int main() {
     *reinterpret_cast<const char**>(FixtureAddress(0x901748))=title;
     std::vector<BYTE> profile(0x3000);
     strcpy_s(reinterpret_cast<char*>(profile.data()),32,"Alpha");profile[32]=1;
-    DWORD database[8]{};database[4]=reinterpret_cast<DWORD>(profile.data());
+    DWORD database[0x128/4]{};database[4]=reinterpret_cast<DWORD>(profile.data());
     *reinterpret_cast<DWORD**>(FixtureAddress(0x91cf90))=database;
     *reinterpret_cast<int*>(FixtureAddress(0x925e90))=6; // No frontend getter code is executed in this fixture.
     auto stable=Stable();for(int i=0;i<200;++i) stable[i*5]=0xffffffff;
@@ -158,7 +167,11 @@ int main() {
     cart::OriginalCheckout=reinterpret_cast<cart::CheckoutFn>(&CartCheckout);
     cart::OriginalPreviewPart=reinterpret_cast<cart::PreviewPartFn>(&CartPreviewPart);
     cart::OriginalCartSetup=reinterpret_cast<cart::CheckoutFn>(&CartSetupNative);
+    OriginalStableBackup=reinterpret_cast<StableBackupFn>(&NativeStableBackup);
+    OriginalStableDirty=reinterpret_cast<StableDirtyFn>(&NativeStableDirty);
+    BackupCarStable(database,nullptr);
     Check(BeginShop(9,true)&&PreviewShop(9,cartValue,true)&&cart::Accept(9),"Native adapter inserts stance item");
+    Check(!IsCarStableDirty(database,nullptr),"Queued stance alone must not request an owned-car save");
     Check(cartAllocations==2&&cartManager[0x1BC/4]==1&&cartSentinel[0]==reinterpret_cast<DWORD>(cart::Item+1),
           "Native item/part allocations and list ownership agree");
     Check(Pending.at(key).values[4]==-2.5f&&Resolve(ride.data(),0,2,0)==-6.f,"Native cart insertion only previews");
@@ -178,9 +191,16 @@ int main() {
     Check(!cart::Item&&cartAllocations==0&&cartManager[0x1BC/4]==0&&Pending.at(key).values[4]==-2.5f,
           "Unchecked item is discarded by native cleanup without purchase");
     Check(BeginShop(9,true)&&PreviewShop(9,cartValue,true)&&cart::Accept(9),"Queue native purchase case");
+    BackupCarStable(database,nullptr);
+    BackupCarStable(database,nullptr); // Repeated native setup must not move the checkpoint.
     cart::Checkout(cartManager,nullptr);
     Check(!cart::Item&&cartAllocations==0&&cartManager[0x1BC/4]==0&&Pending.at(key).values[4]==-6.f,
           "Native checkout detaches synthetic slot, promotes absolute values and frees allocations once");
+    Check(IsCarStableDirty(database,nullptr)&&!IsCarStableDirty(database,nullptr)&&nativeStableQueries==3,
+          "Stance-only purchase requests native save once and always consumes the native checkpoint");
+    BackupCarStable(database,nullptr);nativeStableDirty=true;
+    Check(IsCarStableDirty(database,nullptr),"Unchanged stance never suppresses a native parts save");
+    nativeStableDirty=false;
     Check(BeginShop(9,true)&&PreviewShop(9,cartValue,true)&&cart::Accept(9),"Queue stance in mixed native cart");
     auto ordinaryPart=reinterpret_cast<DWORD*>(CartAllocate(0x2C));
     CartPart(ordinaryPart,nullptr,nullptr,23,0,7,false,0,0,false);
@@ -216,6 +236,16 @@ int main() {
     Check(LoadRace(connection,nullptr,1,0,true,customization)&&
           Resolve(raceLoaded.data(),0,2,0)==-2.5f&&!ActiveRaceLoad,
           "Synchronous first race car copy retains purchased stance and releases load scope");
+    auto quickRace=reinterpret_cast<BYTE*>(stable)+0xFA0+2*0x198;
+    quickRace[0x194]=2;
+    OriginalWriteRecord=reinterpret_cast<WriteRecordFn>(&NativeWriteRecord);
+    WriteRecord(quickRace,nullptr,ride.data());
+    Check(BindRaceCustomization(ai.data(),quickRace,0)&&Resolve(ai.data(),0,2,0)==-2.5f,
+          "Reserved Quick Race record inherits only the explicitly converted owned RideInfo");
+    auto unowned=ride;
+    WriteRecord(quickRace,nullptr,unowned.data());
+    Check(!BindRaceCustomization(ai.data(),quickRace,0)&&Resolve(ai.data(),0,2,0)==0,
+          "Reusing the same Quick Race record for an unowned identical car drops old lineage");
     Check(!BindRaceCustomization(ai.data(),customization,2)&&Resolve(ai.data(),0,2,0)==0,
         "AI usage and reused RideInfo allocation discard owned stance");
     std::array<BYTE,0x198> copied{};std::memcpy(copied.data(),customization,copied.size());

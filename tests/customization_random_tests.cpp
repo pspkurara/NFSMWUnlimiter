@@ -35,7 +35,8 @@ int main() {
     CustomizationSave::TransientRideCopy=&R::RideCopy;
     CustomizationSave::TransientRecordCopy=&R::RecordCopy;
     R::OriginalRead=reinterpret_cast<R::WriteFn>(&NativeRead);
-    R::OriginalWrite=reinterpret_cast<R::WriteFn>(&NativeWrite);
+    CustomizationSave::OriginalWriteRecord=reinterpret_cast<CustomizationSave::WriteRecordFn>(&NativeWrite);
+    CustomizationSave::TransientRecordWrite=&R::RecordWritten;
     std::vector<DWORD> source(0xc4),viewer(0xc4),race(0xc4),identical(0xc4);
     source[0]=123;identical=source;
     R::Randomized(source.data());
@@ -53,7 +54,7 @@ int main() {
     Check(R::Resolve(viewer.data(),1,0,0)==-.01f&&samples==1,"Frontend copy preserves selection without reroll");
     std::array<BYTE,0x198> record{},copy{};
     // Accept uses CarViewer's static RideInfo, rather than its render instance.
-    R::WriteRecord(record.data(),nullptr,viewerStatic);
+    CustomizationSave::WriteRecord(record.data(),nullptr,viewerStatic);
     CustomizationSave::OriginalCustomizationCopy=reinterpret_cast<void*>(&NativeCopy);
     auto from=record.data();auto to=copy.data();
     __asm {
@@ -90,7 +91,7 @@ int main() {
     Check(callCtor(reinterpret_cast<void*>(&R::RideStock),source.data())==source.data()&&R::Resolve(source.data(),0,0,0)==0,
         "Stock rebuild clears stale generation");
     for(auto cave:{&R::RecordInit,&R::RecordDefault,&R::RecordPreset}) {
-        R::Randomized(source.data());R::WriteRecord(record.data(),nullptr,source.data());
+        R::Randomized(source.data());CustomizationSave::WriteRecord(record.data(),nullptr,source.data());
         Check(callCtor(reinterpret_cast<void*>(cave),record.data())==record.data(),"Record cave preserves constructor return");
         R::ReadRecord(record.data(),nullptr,race.data());
         Check(R::Resolve(race.data(),0,0,0)==0,"Record initialization/default/preset invalidates selection");
@@ -103,7 +104,7 @@ int main() {
     auto stable=CustomizationSave::Stable();for(int i=0;i<200;++i)stable[i*5]=0xffffffff;
     stable[0]=7;stable[1]=11;stable[2]=123;stable[3]=2;reinterpret_cast<BYTE*>(stable)[16]=1;
     auto owned=reinterpret_cast<BYTE*>(stable)+0xfa0+0x198;owned[0x194]=1;
-    R::Randomized(source.data());R::WriteRecord(owned,nullptr,source.data());
+    R::Randomized(source.data());CustomizationSave::WriteRecord(owned,nullptr,source.data());
     R::ReadRecord(owned,nullptr,race.data());
     Check(R::Resolve(race.data(),0,0,0)==0&&CustomizationSave::Pending.empty(),"Owned data is isolated from random selections");
     CustomizationSave::LoadLocked("");
