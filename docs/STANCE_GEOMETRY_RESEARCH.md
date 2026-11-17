@@ -114,3 +114,45 @@ car pointer from an earlier BodyTrace had already been reused by UI allocations,
 demonstrating why production capture must occur inside the verified submission
 scope rather than dereferencing previous log addresses. Runtime copying still
 needs resource lifetime/selected model correspondence and per-draw transforms.
+
+## Tyre-only deformation evidence, 2026-11-18
+
+The offline report also includes FRONT_TIRE_A, material names, diffuse map indices
+and their resolved texture hashes. Texture entries are eight bytes (hash plus
+unused word), as verified against the primary
+[SolidReader](https://github.com/NFSTools/NFS-ModTools/blob/master/Common/Geometry/SolidReader.cs)
+and the material indices in MostWantedSolidReader. These identities are evidence,
+not a production tyre classifier.
+
+Punto's RIM_KIT00_GUN_METAL/CHROME and TIRE_KIT00_SIDEWALL all resolve to
+689AE908. A diffuse-texture whitelist would deform the rim. Fiat's three
+materials are all named `Material`, so material-name matching alone also fails.
+
+The report measures the minimum distance of the entire triangle surface to
+local Y (wheel axle), plus maximum vertex radius. Including triangle interiors
+rejects back caps whose corner vertices lie outside the actual tyre circumference.
+
+| Stock LOD-A surface | Minimum radius (m) | Maximum radius (m) |
+| --- | ---: | ---: |
+| Fiat back cap, E38806E3 | 0 | 0.34067 |
+| Fiat rim, 51CEE106 | 0 | 0.21900 |
+| Fiat outer ring, 8BAC1B72 | 0.21123 | 0.30700 |
+| Punto rim gun metal | 0 | 0.29956 |
+| Punto tyre sidewall | 0.22819 | 0.33113 |
+| Punto tyre back cap | 0 | 0.38397 |
+| Punto tyre tread | 0.32916 | 0.33113 |
+
+These two cases support using radial topology alongside material identities.
+Neither the largest material AABB nor maximum vertex radius identifies the tyre:
+the caps have larger corner radii. This is still insufficient evidence for every
+MOD wheel, displaced axle, disconnected tyre mesh or LOD. No live mesh mutation
+or stretch setting is enabled by this work. Required next steps remain exact
+draw ownership, wheel-local coordinates, tyre/rim boundary selection, smooth
+radial taper with corrected normals, per-draw buffer isolation and save/menu ABI
+extension. Shared mesh data must never be edited in place.
+
+REDUX's WHEELS/WHEELS9 files in the current test copy start with `dono` rather
+than the supported native chunk directory. They are not decoded by this offline
+reader; runtime capture must validate the selected wheel rather than substituting
+the stock-car wheel measurements above. The generated report remains local and
+contains only metadata/bounds, never copied vertex or texture payloads.

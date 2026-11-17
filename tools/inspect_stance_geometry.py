@@ -50,6 +50,32 @@ def chunks(b, a=0, z=None):
             yield from chunks(b, p + 8, p + 8 + n)
         p += 8 + n
 
+def projected_radius_range(vertices, indices):
+    """Surface radius about local Y, including triangle interiors, not AABB corners."""
+    minimum = math.inf
+    maximum = 0.0
+    for at in range(0, len(indices), 3):
+        points = [(vertices[i][0], vertices[i][2]) for i in indices[at:at+3]]
+        maximum = max(maximum, *(math.hypot(x, z) for x, z in points))
+        signs = []
+        area = 0.0
+        closest = math.inf
+        for i in range(3):
+            x, z = points[i]
+            u, v = points[(i+1) % 3]
+            signs.append(x*v-z*u)
+            area += x*v-z*u
+            dx, dz = u-x, v-z
+            length = dx*dx+dz*dz
+            t = max(0.0, min(1.0, -(x*dx+z*dz)/length)) if length else 0.0
+            closest = min(closest, math.hypot(x+t*dx, z+t*dz))
+        # Cap corners can lie on the tyre circumference while their triangles
+        # cross the axle. Vertex-only radii would mistake the cap for a ring.
+        inside = abs(area) > 1e-12 and (min(signs) >= 0 or max(signs) <= 0)
+        minimum = min(minimum, 0.0 if inside else closest)
+    return [minimum, maximum] if indices else None
+
+
 def triangle_evidence(solid, nodes, materials, positions):
     blocks = [(p, n) for tag, p, n in nodes if tag == 0x134B03]
     if len(blocks) != 1:
@@ -83,6 +109,7 @@ def triangle_evidence(solid, nodes, materials, positions):
                        material['bounds'][1][axis] >= bounds[1][axis]-.00001 for axis in range(3))
         groups.append({'triangles': count//3, 'minimumIndex': min(indices), 'maximumIndex': max(indices),
                        'referencedBounds': bounds, 'materialBoundsError': error,
+                       'projectedYRadiusRange': projected_radius_range(vertices, indices),
                        'withinMaterialVertexRange': min(indices) >= first and max(indices) < last,
                        'insideMaterialBounds': contains})
     # A geometric cross-check avoids choosing an index convention just because
@@ -92,6 +119,22 @@ def triangle_evidence(solid, nodes, materials, positions):
     verified = all(g.get('withinMaterialVertexRange', True) and g.get('insideMaterialBounds', True) for g in groups)
     return {'verified': verified, 'indexConvention': 'vertex-stream relative', 'paddingBytes': padding, 'groups': groups,
             'triangles': sum(m['triangles'] for m in materials)}
+
+
+def material_identities(solid, nodes):
+    """Read identities only; a name/hash alone never proves a tyre surface."""
+    tables = [(p, n) for tag, p, n in nodes if tag == 0x134012]
+    if len(tables) > 1:
+        raise ValueError('Ambiguous solid texture table')
+    textures = []
+    if tables:
+        p, n = tables[0]
+        if n % 8:
+            raise ValueError('Unsupported solid texture table')
+        textures = [struct.unpack_from('<I', solid, at)[0] for at in range(p, p+n, 8)]
+    names = [solid[p:p+n].split(b'\0', 1)[0].decode('ascii', errors='replace')
+             for tag, p, n in nodes if tag == 0x134C02 and n]
+    return textures, names
 
 
 def inspect(root, car):
@@ -112,11 +155,13 @@ def inspect(root, car):
         if not header or len(header) < 161:
             continue
         name = header[160:].split(b'\x00')[0].decode('ascii', errors='replace')
-        if not any((term in name for term in ('BODY_A', 'BASE_A', 'WHEEL_A', 'BRAKE_A'))):
+        if not any((term in name for term in ('BODY_A', 'BASE_A', 'WHEEL_A', 'TIRE_A', 'BRAKE_A'))):
             continue
         record = {'name': name, 'hash': f'{key:08X}', 'materials': [], 'buffers': [], 'pivot': list(struct.unpack_from('<16f', header, 64))}
         m = record['pivot']
         record['pivotDeterminant'] = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) + m[2] * (m[4] * m[9] - m[5] * m[8])
+        textures, material_names = material_identities(solid, nodes)
+        record['textureHashes'] = [f'{value:08X}' for value in textures]
         materials = []
         for tag, p, n in nodes:
             if tag != 1264386:
@@ -129,8 +174,17 @@ def inspect(root, car):
                 effect, _, flags, vertices, triangles = struct.unpack_from('<5I', solid, pos + 48)
                 bounds = [list(struct.unpack_from('<3f', solid, pos)),
                           list(struct.unpack_from('<3f', solid, pos+12))]
-                materials.append({'effect': effect, 'flags': flags, 'vertices': vertices,
-                                  'triangles': triangles, 'bounds': bounds})
+                diffuse = solid[pos+24]
+                material = {'effect': effect, 'flags': flags, 'vertices': vertices,
+                            'triangles': triangles, 'bounds': bounds, 'diffuseMapIndex': diffuse,
+                            'diffuseTextureHash': f'{textures[diffuse]:08X}' if diffuse < len(textures) else None}
+                materials.append(material)
+        # Name chunks are optional. A partial table must not shift later names
+        # onto the wrong draw/material; leave the entire mapping unassigned.
+        record['materialNamesComplete'] = len(material_names) == len(materials)
+        if record['materialNamesComplete']:
+            for material, material_name in zip(materials, material_names):
+                material['name'] = material_name
         record['materials'] = materials
         streams = []
         for material in materials:
