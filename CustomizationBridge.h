@@ -61,9 +61,39 @@ struct Context {
     unsigned body{},frontWheel{},rearWheel{};
     int kit{};
     Matrix heightWorld{},heightDelta{},drawRoot{};
-    bool heightChanged{},rootCaptured{};
+    bool heightChanged{},rootCaptured{},traceRootSeen{};
+    unsigned trace=0,traceParts=0;
 };
 thread_local Context* current=nullptr;
+static bool TraceBodyMatrices=false;
+// Opt-in, bounded snapshots: render hooks must not produce a log every frame.
+struct TraceKey {
+    uintptr_t car,view;float front,rear;int reflection;
+};
+static unsigned TraceCount=0;
+static TraceKey TraceKeys[64]{};
+static unsigned BeginBodyTrace(DWORD* car,void* view,float front,float rear,int reflection) {
+    if(!TraceBodyMatrices||TraceCount==64||(!front&&!rear))return 0;
+    const TraceKey key={reinterpret_cast<uintptr_t>(car),reinterpret_cast<uintptr_t>(view),front,rear,reflection};
+    for(unsigned i=0;i<TraceCount;++i) {
+        const auto& old=TraceKeys[i];
+        if(old.car==key.car&&old.view==key.view&&old.front==front&&old.rear==rear&&old.reflection==reflection)return 0;
+    }
+    TraceKeys[TraceCount]=key;return ++TraceCount;
+}
+static void TraceMatrix(const Context& context,const char* stage,const Matrix* matrix,const void* part=nullptr) {
+    if(!context.trace||!matrix)return;
+    char line[768]{};
+    const auto& m=matrix->m;
+    const double determinant=double(m[0][0])*(double(m[1][1])*m[2][2]-double(m[1][2])*m[2][1])-
+        double(m[0][1])*(double(m[1][0])*m[2][2]-double(m[1][2])*m[2][0])+
+        double(m[0][2])*(double(m[1][0])*m[2][1]-double(m[1][1])*m[2][0]);
+    sprintf_s(line,"BodyTrace %u %s part=%p determinant=%.9g matrix="
+        "[%.9g %.9g %.9g %.9g; %.9g %.9g %.9g %.9g; %.9g %.9g %.9g %.9g; %.9g %.9g %.9g %.9g]",
+        context.trace,stage,part,determinant,m[0][0],m[0][1],m[0][2],m[0][3],
+        m[1][0],m[1][1],m[1][2],m[1][3],m[2][0],m[2][1],m[2][2],m[2][3],m[3][0],m[3][1],m[3][2],m[3][3]);
+    Log(line);
+}
 unsigned PartHash(DWORD* ride,int slot) {
     DWORD* part=RideInfo_GetPart(ride,slot);
     return part?part[0]:0;
@@ -183,11 +213,20 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
         if(std::fabs(inset)<=2.f&&scale>.001f) brakeMarker[axle]+=inset/scale;
     }
     float front=Value(context,0,0,0.f),rear=Value(context,1,0,0.f);
+    context.trace=BeginBodyTrace(car,view,front,rear,reflection);
+    if(context.trace) {
+        char line[384]{};
+        sprintf_s(line,"BodyTrace %u car=%p type=%.64s view=%p reflection=%d damage=%p height=[%.9g %.9g] attributes=%p position=[%.9g %.9g %.9g]",
+            context.trace,car,context.name?context.name:"?",view,reflection,reinterpret_cast<void*>(car[0x40/4]),
+            front,rear,reinterpret_cast<void*>(car[1517]),position[0],position[1],position[2]);
+        Log(line);TraceMatrix(context,"native-body",body);
+    }
     if(std::fabs(front)<=2.f&&std::fabs(rear)<=2.f&&car[1517]) {
         auto attributes=reinterpret_cast<const float*>(car[1517]);
         // PC ecar layout: TireOffsets array is at +0x10, stride 16, x is longitudinal.
         context.heightDelta=CustomizationMath::HeightTransform(attributes[4],attributes[12],front,rear);
         context.heightChanged=front!=0.f||rear!=0.f;
+        TraceMatrix(context,"height-delta",&context.heightDelta);
     }
     Context* previous=current;current=&context;
     const bool result=originalRender(car,view,position,body,tires,brakes,spinners,flags,light,reflection,shadow,tireLod,carLod);
@@ -203,6 +242,9 @@ Matrix* __fastcall CaptureBodyRoot(Matrix* destination,void*,const Matrix* sourc
     // A BASE/BODY draw can instead contain the damage actor's GetPartMatrix.
     Matrix* result=reinterpret_cast<CopyMatrixFn>(0x445090)(destination,source);
     if(current&&!current->rootCaptured&&source) {
+        const bool traceRoot=current->trace&&!current->traceRootSeen;
+        if(traceRoot)TraceMatrix(*current,"biased-root",source);
+        current->traceRootSeen=true;
         Matrix inverse;
         if(CustomizationMath::AffineInverse(*source,inverse)) {
             // Cache the conjugated transform once per car/view. Every rigid or
@@ -211,9 +253,11 @@ Matrix* __fastcall CaptureBodyRoot(Matrix* destination,void*,const Matrix* sourc
             current->drawRoot=current->heightChanged
                 ?CustomizationMath::Multiply(current->heightDelta,*source):*source;
             current->rootCaptured=true;
+            TraceMatrix(*current,"height-world",&current->heightWorld);
         } else {
             // Retain native geometry for singular, non-affine or invalid roots.
             current->heightChanged=false;
+            if(traceRoot)Log("BodyTrace rejected root: affine inverse unavailable; native geometry retained.");
         }
     }
     return result;
@@ -226,6 +270,15 @@ void __fastcall BodyPart(DWORD* car,void*,void* view,void* part,Matrix* matrix,v
         if(auto copy=allocate(1)) {
             *copy=CustomizationMath::Multiply(*matrix,current->heightWorld);
             transformed=copy;
+        }
+    }
+    if(current&&current->car==car&&current->trace&&current->traceParts<8) {
+        // Include the BODY slot even if earlier visible parts exhausted the sample.
+        const auto address=reinterpret_cast<uintptr_t>(part),begin=reinterpret_cast<uintptr_t>(car)+0xB84;
+        const bool bodySlot=address>=begin&&address-begin>=23*20&&address-begin<24*20;
+        if(current->traceParts<4||bodySlot) {
+            TraceMatrix(*current,"part-input",matrix,part);TraceMatrix(*current,"part-output",transformed,part);
+            ++current->traceParts;
         }
     }
     // Calling the normal entry preserves the existing VRM RenderPart detour.
@@ -284,6 +337,14 @@ void __declspec(naked) RearCamber() {
     }
 }
 bool Install() {
+    char modulePath[MAX_PATH]{};HMODULE selfModule=nullptr;
+    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(&Install),&selfModule)&&GetModuleFileNameA(selfModule,modulePath,MAX_PATH)) {
+        if(char* slash=strrchr(modulePath,'\\')) {
+            strcpy_s(slash+1,MAX_PATH-size_t(slash+1-modulePath),"NFSMWUnlimiterSettings.ini");
+            TraceBodyMatrices=GetPrivateProfileIntA("Debug","StanceBodyMatrices",0,modulePath)!=0;
+        }
+    }
     const unsigned char entry[]={0x55,0x8b,0xec,0x83,0xe4,0xf0};
     const unsigned char front[]={0xd9,0x87,0xf0,0,0,0};
     const unsigned char rear[]={0xd9,0x87,0xf8,0,0,0};

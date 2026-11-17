@@ -34,3 +34,20 @@ possible source of a reversed image under a car. It does not prove that the user
 was seeing that reflection, explain why the main body did not lower, or exclude
 interaction with damage/part matrices, a material/shader or another mod. Runtime
 matrix/pass evidence is still needed for the actual Fiat symptom.
+
+PC damage-path follow-up: 74EA6E obtains GetPartMatrix, 74EA76 copies it,
+and 74EAAB jumps to 74EC99. The shared call at 74EC9B therefore already passes
+both damage and ordinary body submissions through BodyPart. A separate missing
+damage RenderPart hook does not explain the symptom.
+
+To capture the unresolved runtime case, set `[Debug] StanceBodyMatrices=1` in
+the tested installation's `scripts/NFSMWUnlimiterSettings.ini`, then restart.
+The bridge appends `BodyTrace` lines to LOCALAPPDATA/NFSMWCustomizationLab/bridge.log.
+Each distinct car/view/height/reflection combination is sampled once, capped at
+64 combinations per process. Each records native body, biased root, height delta,
+conjugated world delta and up to eight part input/output pairs (including the BODY
+slot). Full 4x4 values, determinants, damage pointer and pass identity distinguish
+an inverse rejection, reflection geometry, missing height data and a changed part
+basis without adding draws or mutating native geometry. Default is OFF; no file
+I/O or diagnostic matrix calculations occur on the disabled path. The trace is
+diagnostic evidence only and does not fix the Fiat issue by itself.
