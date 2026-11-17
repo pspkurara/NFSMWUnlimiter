@@ -2,9 +2,17 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <limits>
 using namespace CustomizationMath;
-void near(float a,float b) { if(std::fabs(a-b)>0.0001f) { std::fprintf(stderr,"%f != %f\n",a,b);std::exit(1); } }
+void near(float a,float b) { if(!std::isfinite(a)||!std::isfinite(b)||std::fabs(a-b)>0.0001f) { std::fprintf(stderr,"%f != %f\n",a,b);std::exit(1); } }
 int main() {
+    const auto nan=std::numeric_limits<float>::quiet_NaN();
+    for(float height:{-.75f,.75f}) {
+        near(HeightTransform(0,0,height,height).m[3][2],height);
+        near(HeightTransform(nan,nan,height,height).m[3][2],height);
+    }
+    near(HeightTransform(0,0,-.2f,.2f).m[3][2],0); // Invalid wheelbase cannot invent a rake.
+    near(HeightTransform(1.5f,-1.5f,nan,nan).m[3][2],0);
     auto body=Identity();body.m[3][0]=13;body.m[3][1]=-8;body.m[3][2]=2;
     auto part=body;part.m[3][0]+=1.5f;
     auto moved=MoveBodyPart(part,body,HeightTransform(1.5f,-1.5f,-.1f,-.1f));

@@ -221,10 +221,12 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
             front,rear,reinterpret_cast<void*>(car[1517]),position[0],position[1],position[2]);
         Log(line);TraceMatrix(context,"native-body",body);
     }
-    if(std::fabs(front)<=2.f&&std::fabs(rear)<=2.f&&car[1517]) {
+    if(std::fabs(front)<=2.f&&std::fabs(rear)<=2.f) {
         auto attributes=reinterpret_cast<const float*>(car[1517]);
         // PC ecar layout: TireOffsets array is at +0x10, stride 16, x is longitudinal.
-        context.heightDelta=CustomizationMath::HeightTransform(attributes[4],attributes[12],front,rear);
+        // A missing axle layout still permits uniform translation, never guessed rake.
+        context.heightDelta=CustomizationMath::HeightTransform(attributes?attributes[4]:0.f,
+            attributes?attributes[12]:0.f,front,rear);
         context.heightChanged=front!=0.f||rear!=0.f;
         TraceMatrix(context,"height-delta",&context.heightDelta);
     }

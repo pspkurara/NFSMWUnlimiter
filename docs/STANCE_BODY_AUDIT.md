@@ -51,3 +51,13 @@ an inverse rejection, reflection geometry, missing height data and a changed par
 basis without adding draws or mutating native geometry. Default is OFF; no file
 I/O or diagnostic matrix calculations occur on the disabled path. The trace is
 diagnostic evidence only and does not fix the Fiat issue by itself.
+
+Uniform-height follow-up: HeightTransform previously rejected equal front/rear
+heights when the wheelbase was zero, missing or nonfinite, although translation
+requires no axle references. The bridge also skipped every height operation when
+the ecar layout pointer was absent. Equal finite heights now produce translation
+before axle validation, and a missing layout can use this path. Unequal heights
+still require valid axle data; the bridge does not invent a vehicle wheelbase.
+Fixtures cover both lowering and raising with zero/nonfinite axle positions and
+reject nonfinite heights. This fixes that identifiable dependency defect; it is
+not proof that the Fiat's native attributes are invalid or its symptom is fixed.

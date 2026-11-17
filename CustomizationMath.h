@@ -61,6 +61,11 @@ inline bool AffineInverse(const Matrix& a,Matrix& out) {
 }
 inline Matrix HeightTransform(float frontX,float rearX,float frontHeight,float rearHeight) {
     Matrix r=Identity();
+    if(!std::isfinite(frontHeight)||!std::isfinite(rearHeight))return r;
+    // Equal axle heights are a translation; no wheelbase or axle geometry is
+    // needed. Incomplete MOD attributes must not disable ordinary lowering.
+    if(frontHeight==rearHeight) {r.m[3][2]=frontHeight;return r;}
+    if(!std::isfinite(frontX)||!std::isfinite(rearX))return r;
     const float length=frontX-rearX;
     if(!std::isfinite(length)||std::fabs(length)<.1f) return r;
     const float slope=(frontHeight-rearHeight)/length;
