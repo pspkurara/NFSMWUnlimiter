@@ -18,5 +18,12 @@ int main() {
     if(!Adjust(.8f,.31f,stock,nearDefault,a)||std::fabs(a.radius-.30999f)>.000001f)return 8;
     if(Adjust(.8f,.01f,stock,{-.8f,.2f,.005f},a))return 9;
     if(Adjust(.8f,.3f,{-.8f,.2f,0},stock,a))return 10;
+    // A smaller tyre lowers its hub by the radius difference. Contact stays
+    // invariant, independently for each axle, with no absolute floor guess.
+    for(float radius:{.15f,.3f,.45f}) {
+        const float hub=.32f+ContactHeightDelta(.3f,radius);
+        if(std::fabs((hub-radius)-.02f)>.000001f)return 11;
+    }
+    if(ContactHeightDelta(.3f,NAN)!=0||ContactHeightDelta(0,.3f)!=0)return 12;
     std::cout<<"Race wheel offsets, radius and proportional skid calibration passed\n";
 }

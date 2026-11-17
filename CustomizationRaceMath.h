@@ -4,6 +4,10 @@
 namespace CustomizationRace {
 struct Wheel {float offset,width,radius;};
 struct Adjustment {float positionY,radius,skidScale;};
+inline float ContactHeightDelta(float before,float after) {
+    if(!std::isfinite(before)||!std::isfinite(after)||before<.005f||before>5.f||after<.005f||after>5.f)return 0.f;
+    return after-before;
+}
 // Render offset has the opposite sign to the simulation/render-connection Y.
 // Apply only the change, retaining stock kit offsets and skid calibration.
 inline bool Adjust(float positionY,float radius,const Wheel& before,const Wheel& after,Adjustment& result) {

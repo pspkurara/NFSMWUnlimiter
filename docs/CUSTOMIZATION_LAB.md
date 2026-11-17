@@ -110,6 +110,16 @@ Tests cover both sides of that default and reject invalid/negative results.
 Native UpdateTires uses this radius for wheel roll and compression before deriving
 world contact/FX points. The adapter restores its temporary connection fields
 after the update; it does not edit physics radius, collision or saved native data.
+
+The frontend has no simulation compression term: GarageMain constructs its hub
+matrices before the render-time radius override. The render bridge therefore
+copies those four-wheel matrices into the native frame pool and moves each hub
+by `requestedRadius - nativeMeshRadius`, including brake/spinner matrices.
+This keeps the original tyre-bottom height without guessing a body underside.
+Body lowering remains a separate channel. Driving matrices already receive this
+delta through native compression and must not receive the frontend correction.
+Per-axle changes and the unchanged-radius case are covered by contact invariants;
+actual garage floor/reflection and driving appearance still need live checks.
 This math evidence does not replace live smoke/skid/suspension validation.
 
 ## Build

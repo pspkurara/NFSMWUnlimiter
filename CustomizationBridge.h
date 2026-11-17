@@ -222,14 +222,19 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
     float* widthScale=reinterpret_cast<float*>(car+76);
     float* radiusScale=reinterpret_cast<float*>(car+80);
     float* brakeMarker=reinterpret_cast<float*>(car+84);
+    float contactDelta[4]{};
     for(int wheel=0;wheel<4;++wheel) {
         const int axle=wheel>1;
         float offset=Value(context,axle,1,std::fabs(offsets[wheel]));
         if(offset>=0.f&&offset<=5.f) offsets[wheel]=std::copysign(offset,offsets[wheel]);
         const float width=Value(context,axle,3,widths[axle]*widthScale[wheel]);
-        const float radius=Value(context,axle,4,radii[axle]*radiusScale[wheel]);
+        const float nativeRadius=radii[axle]*radiusScale[wheel];
+        const float radius=Value(context,axle,4,nativeRadius);
         if(width>=.005f&&width<=5.f&&widths[axle]>.005f) widthScale[wheel]=width/widths[axle];
-        if(radius>=.005f&&radius<=5.f&&radii[axle]>.005f) radiusScale[wheel]=radius/radii[axle];
+        if(radius>=.005f&&radius<=5.f&&radii[axle]>.005f) {
+            radiusScale[wheel]=radius/radii[axle];
+            contactDelta[wheel]=CustomizationRace::ContactHeightDelta(nativeRadius,radius);
+        }
     }
     for(int axle=0;axle<2;++axle) {
         float inset=Value(context,axle,5,0.f);
@@ -256,6 +261,19 @@ bool __fastcall Render(DWORD* car,void*,void* view,const float* position,const M
         TraceMatrix(context,"height-delta",&context.heightDelta);
     }
     Context* previous=current;current=&context;
+    // Garage matrices are built before this render-time radius override. Unlike
+    // CarRenderConn::UpdateTires, they have no (renderRadius - physicsRadius)
+    // compression term. Move the hub by that delta so the tyre bottom remains
+    // at its native floor height. Never apply it twice to driving matrices.
+    const auto grounded=[&](Matrix* source)->Matrix* {
+        if(!frontend||!source||std::all_of(std::begin(contactDelta),std::end(contactDelta),[](float v){return v==0.f;}))return source;
+        auto copy=reinterpret_cast<Matrix*(__cdecl*)(int)>(0x405ed0)(4);
+        if(!copy)return source;
+        std::copy_n(source,4,copy);
+        for(unsigned i=0;i<4;++i)copy[i].m[3][2]+=contactDelta[i];
+        return copy;
+    };
+    tires=grounded(tires);brakes=grounded(brakes);spinners=grounded(spinners);
     const bool result=originalRender(car,view,position,body,tires,brakes,spinners,flags,light,reflection,shadow,tireLod,carLod);
     current=previous;
     std::memcpy(car+68,saved,sizeof(saved));
