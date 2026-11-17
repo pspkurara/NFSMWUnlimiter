@@ -1,0 +1,61 @@
+name: Extended camera
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'standalone/**'
+      - 'CustomizationCamera.h'
+      - 'CustomizationControl*.h'
+      - 'CustomizationMouseOrbit.h'
+      - 'CustomizationOrbitMath.h'
+      - 'CustomizationProfile*.h'
+      - 'CustomizationRuntimePeer.h'
+      - 'tests/*control*'
+      - 'tests/*profile*'
+      - 'tests/camera_runtime*'
+      - 'vendor/minhook/**'
+      - 'includes/injector/**'
+      - '.github/workflows/extended-camera.yml'
+  pull_request:
+    paths:
+      - 'standalone/**'
+      - 'CustomizationCamera.h'
+      - 'CustomizationControl*.h'
+      - 'CustomizationMouseOrbit.h'
+      - 'CustomizationOrbitMath.h'
+      - 'CustomizationProfile*.h'
+      - 'CustomizationRuntimePeer.h'
+      - 'tests/*control*'
+      - 'tests/*profile*'
+      - 'tests/camera_runtime*'
+      - 'vendor/minhook/**'
+      - 'includes/injector/**'
+      - '.github/workflows/extended-camera.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  camera-win32:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure standalone camera
+        run: cmake -S standalone -B build-camera -A Win32
+      - name: Build
+        run: cmake --build build-camera --config Release --parallel 4
+      - name: Test controls, persistence and both ASI load orders
+        run: ctest --test-dir build-camera -C Release --output-on-failure
+      - name: Upload development camera
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: NFSMWExtendedCamera-development-win32
+          if-no-files-found: error
+          path: |
+            build-camera/Release/NFSMWExtendedCamera.asi
+            NFSMWCustomizationCamera.ini
+            CustomizationCamera.md
+            CustomizationControls.md
+            standalone/LICENSE
+            vendor/minhook/LICENSE.txt
