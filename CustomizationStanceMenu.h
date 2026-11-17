@@ -42,6 +42,8 @@ static unsigned ResetSelectedLabel=0,ResetAllLabel=0;
 struct FooterGroup {DWORD* object;std::array<DWORD*,2> reset{},showcase{};};
 static std::vector<FooterGroup> FooterGroups;
 static std::array<DWORD*,6> LimitLabels{};
+static std::array<DWORD*,2> AxleButtons{};
+static bool MouseListDirty=false,NativePromptButtons=false;
 static int ResetChannel=-1;
 static uint64_t ResetOwner=0;
 struct SavedText {DWORD* object;unsigned name,language,flags;std::wstring text;};
@@ -219,6 +221,13 @@ static void Tick() {
     if(RefreshPending&&Screen&&!Closing&&!Constructing) {
         RefreshPending=false;Refresh();
     }
+    // Never reallocate the mouse-state array inside a click notification.
+    if(MouseListDirty&&Screen&&!Closing&&NativePromptButtons) {
+        auto package=reinterpret_cast<DWORD*(__thiscall*)(void*,const char*)>(0x516AF0)(
+            *reinterpret_cast<void**>(0x91CADC),Package);
+        if(package)reinterpret_cast<void(__thiscall*)(DWORD*)>(0x5B88F0)(package);
+        MouseListDirty=false;
+    }
 }
 static int SliderIndex(DWORD* slider) {
     for(int i=0;i<7;++i)if(Sliders[i]==slider)return i;
@@ -237,6 +246,30 @@ static void Footer() {
     reinterpret_cast<bool(__thiscall*)(DWORD*,CustomizationFrontendList::GroupsByName<DWORD>*)>(0x5B1560)(package,&found);
     for(auto group:found.groups) {
         if(group[0x60/4]>32)continue;
+        // Reuse the current PC prompt's FEImage and native button-texture path.
+        // Widescreen/controller texture replacements stay in that path; the
+        // ordinary game resolves its own keyboard/controller fallback.
+        if(NativePromptButtons&&(!AxleButtons[0]||!AxleButtons[1])&&group[0x2C/4]&&group[0x30/4]>=0x44&&!(group[0x1C/4]&1u)&&
+           group[0x10/4]!=bStringHash("HELP_BUTTON")) {
+            auto image=reinterpret_cast<DWORD*>(group[0x64/4]);
+            for(unsigned n=0;n<group[0x60/4]&&image;++n,image=reinterpret_cast<DWORD*>(image[1]))
+                if(image[0x18/4]==1&&image[0x30/4]>=0x54)break;
+            if(image)for(unsigned action=0;action<2;++action) {
+                if(AxleButtons[action])continue;
+                auto button=(*reinterpret_cast<DWORD*(__thiscall**)(DWORD*,bool)>(image[0]+4))(image,false);
+                if(!button)continue;
+                char name[48]{};sprintf_s(name,"MWCL_STANCE_AXLE_%u",action);
+                button[0x10/4]=bStringHash(name);button[0x58/4]=0;
+                CustomizationFrontendList::CopyDrawData(button,image,0x54);
+                button[0x1C/4]|=0x20000; // Native FF_MouseObject, without changing menu navigation.
+                reinterpret_cast<void(__cdecl*)(DWORD*,unsigned)>(0x515BB0)(button,action?0x682:0x5BC);
+                const auto data=reinterpret_cast<const float*>(group[0x2C/4]);
+                float position[]={float(action?220:150)-data[7],-177.f-data[8],300.f-data[9]};
+                reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(button,position,false);
+                CustomizationFrontendList::AppendChild(group,button,FEMinList_AddNode);
+                AxleButtons[action]=button;MouseListDirty=true;
+            }
+        }
         auto at=std::find_if(FooterGroups.begin(),FooterGroups.end(),[group](const auto& value){return value.object==group;});
         if(at==FooterGroups.end()){FooterGroups.push_back({group});at=FooterGroups.end()-1;}
         std::array<DWORD*,2> labels{};unsigned count=0;
@@ -455,6 +488,9 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(Closing)return;
     if(!Current()){Cancel();Leave();return;}
+    if(message==0xF459B307&&object&&ResetChannel<0&&(object==AxleButtons[0]||object==AxleButtons[1])) {
+        EditSession.SelectAxle((EditSession.axle+(object==AxleButtons[1]?1:2))%3);Refresh();return;
+    }
     if(message==ResetConfirmed||message==ResetAll||message==ResetDismissed) {
         const int channel=ResetChannel;const auto axle=ResetAxle;const auto owner=ResetOwner;
         ResetChannel=-1;ResetOwner=0;
@@ -555,6 +591,7 @@ static void __fastcall Destructor(DWORD* screen,void*) {
         ResetChannel=-1;ResetOwner=0;
         FooterGroups.clear();
         LimitLabels.fill(nullptr);
+        AxleButtons.fill(nullptr);MouseListDirty=false;
     }
     OriginalDestructor(screen);
 }
@@ -631,6 +668,9 @@ static bool Install(uintptr_t compatibleCartName=0,bool orbitView=true) {
     NormalStep=CustomizationCamera::Number(menuSettings,"StanceMenu","StepMultiplier",5,.01f,1000);
     FineStep=CustomizationCamera::Number(menuSettings,"StanceMenu","FineStepMultiplier",1,.01f,1000);
     FastStep=CustomizationCamera::Number(menuSettings,"StanceMenu","FastStepMultiplier",20,.01f,1000);
+    const BYTE mouseList[]={0x64,0xA1,0,0,0,0,0x6A,0xFF};
+    const BYTE buttonTexture[]={0x56,0x8B,0x74,0x24,0x08,0x85,0xF6};
+    NativePromptButtons=CustomizationCamera::Matches(0x5B88F0,mouseList)&&CustomizationCamera::Matches(0x515BB0,buttonTexture);
     struct Hook {uintptr_t address;void* replacement;void** original;std::vector<BYTE> bytes;};
     const std::vector<Hook> hooks={
         {0x5A6060,&Setup,reinterpret_cast<void**>(&OriginalSetup),{0x6A,0xFF,0x68,0x78,0x37,0x87,0}},

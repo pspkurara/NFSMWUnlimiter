@@ -144,3 +144,15 @@ Successful cart submission explicitly plays native cue 50, the same cue returned
 for suspension/brakes by PC CustomizePerformance::NotifySoundMessage (7A7130).
 The cloned tuning screen's generic select cue is suppressed. Visible layout,
 sound and Showcase focus recovery still require verification of this revision.
+
+The axle selector also adds two mouseable FEImage prompts in the header's right
+area. They reuse the installed PC prompt image, its complete 54h current data
+(including UVs), and FEngSetButtonTexture at 515BB0 with L1/R1 hashes 5BC/682,
+matching native CustomizeRims::Setup. Native mouse-down messages identify the
+actual cloned object and change the axle once. The native mouse-state list is
+rebuilt on the garage tick, never inside its click callback. This does not yet
+implement arbitrary button reassignment or controller-zoom policy; configurable
+assignment, independent zoom enablement, separate mouse zoom and native-image
+prompts following the effective mapping are remaining input work. Live image
+appearance, click hitboxes and interaction with the user's texture replacement
+must be verified before release.

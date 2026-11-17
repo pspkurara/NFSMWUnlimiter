@@ -7,9 +7,9 @@ namespace CustomizationFrontendList {
 // FEObject's native clone allocates a zeroed current draw-data block. Its
 // animation states are cloned separately; a new static label needs the current
 // color/transform too, especially nonzero scale. Keep the clone's own allocation.
-template<class Word> bool CopyDrawData(Word* clone,const Word* source) {
+template<class Word> bool CopyDrawData(Word* clone,const Word* source,unsigned bytes=0x44) {
     static_assert(sizeof(Word)==4,"PC frontend words");
-    constexpr unsigned bytes=0x44;
+    if(bytes!=0x44&&bytes!=0x54)return false; // Base transform, or FEImage including UVs.
     if(!clone||!source||!clone[0x2C/4]||!source[0x2C/4]||
        clone[0x2C/4]==source[0x2C/4]||clone[0x30/4]<bytes||source[0x30/4]<bytes)return false;
     std::memcpy(reinterpret_cast<void*>(clone[0x2C/4]),reinterpret_cast<const void*>(source[0x2C/4]),bytes);

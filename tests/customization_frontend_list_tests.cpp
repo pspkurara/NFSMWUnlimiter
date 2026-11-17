@@ -53,6 +53,13 @@ int main() {
     if(draw[7]==0||source[11]==clone[11])return 7;
     clone[12]=sizeof(copy)-4;
     if(CustomizationFrontendList::CopyDrawData(clone,source))return 8;
+    uint32_t imageDraw[21]{},imageCopy[21]{};
+    imageDraw[14]=imageDraw[15]=0x42000000; // 32px button dimensions.
+    imageDraw[19]=imageDraw[20]=0x3F800000; // FEImage's lower-right UV.
+    source[11]=reinterpret_cast<uint32_t>(imageDraw);source[12]=sizeof(imageDraw);
+    clone[11]=reinterpret_cast<uint32_t>(imageCopy);clone[12]=sizeof(imageCopy);
+    if(!CustomizationFrontendList::CopyDrawData(clone,source,0x54)||
+       std::memcmp(imageDraw,imageCopy,sizeof(imageDraw)))return 9;
     // Relocation-free instructions of the inspected PC function 5B2160..5B21AB.
     // Run the production adapter against native insertion, including its null
     // predecessor branch and unlinked-node ABADCAFE sentinels from the crash.
