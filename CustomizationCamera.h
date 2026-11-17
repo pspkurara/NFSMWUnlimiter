@@ -38,6 +38,7 @@ namespace CustomizationCamera
     static bool DriverPreviewActive = false;
     static bool GarageControlled = false;
     static void* ControlledGarageMover=nullptr;
+    static bool GarageHadFocus=true;
     static bool Installed = false;
     static bool NativeLookBackVerified = false;
     static bool NativeViewVerified = false;
@@ -255,11 +256,14 @@ namespace CustomizationCamera
         float x = 0, y = 0;
         bool reset = false;
         const bool nativePermission=*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134);
-        const bool nativeMouse=NativeMouseVerified&&nativePermission&&*reinterpret_cast<const BYTE*>(0x987F70);
+        const bool foreground=Foreground();
+        const bool inputReady=foreground&&GarageHadFocus;
+        GarageHadFocus=foreground;
+        const bool nativeMouse=inputReady&&NativeMouseVerified&&nativePermission&&*reinterpret_cast<const BYTE*>(0x987F70);
         const bool screenAllows=PartsScreen?PartsScreen[0x148/4]!=0x307:
             !Config.partsOnly&&(*(reinterpret_cast<const BYTE*>(garage)+0x78)||*reinterpret_cast<const BYTE*>(0x926134));
-        bool control = Config.garage && screenAllows && GarageMover(garage) && ReadStick(x, y, reset);
-        if (!control)
+        const bool eligible=Config.garage&&screenAllows&&GarageMover(garage);
+        if (!eligible)
         {
             if(!nativeMouse)StopGarageSpeeds(garage);
             else {GarageControlled=false;ControlledGarageMover=nullptr;}
@@ -276,6 +280,23 @@ namespace CustomizationCamera
         reinterpret_cast<void(__thiscall*)(DWORD*)>(0x7A2310)(garage);
         userRotate = savedRotate;
         showcase = savedShowcase;
+        if(!inputReady) {
+            // Native mouse handling precedes this call. Drop residual manual
+            // velocity during focus loss and the first returning frame, even
+            // after mouse ownership cleared our stick lease. Do not create a
+            // manual mode or change native automatic/cinematic modes.
+            auto mover=GarageMover(garage);
+            if(mover&&*reinterpret_cast<int*>(static_cast<BYTE*>(mover)+0x80)==1) {
+                reinterpret_cast<void(__thiscall*)(void*,float)>(0x476E70)(mover,0);
+                reinterpret_cast<void(__thiscall*)(void*,float)>(0x476F30)(mover,0);
+            }
+            GarageControlled=false;ControlledGarageMover=nullptr;return;
+        }
+        if(!ReadStick(x,y,reset)) {
+            if(!nativeMouse)StopGarageSpeeds(garage);
+            else {GarageControlled=false;ControlledGarageMover=nullptr;}
+            return;
+        }
         // Native mouse handling runs before this joy call and already set speeds.
         // An idle connected pad must not replace those speeds with zero.
         ApplyGarageInput(garage,x,y,nativeMouse);
