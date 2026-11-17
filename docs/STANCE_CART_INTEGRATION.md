@@ -119,9 +119,9 @@ Live validation requires a zero-cost stance-only cart and a mixed native-part
 cart in both My Cars and career shop: preview, reopen unchanged, cancel editor,
 remove item, discard all, purchase once,
 reopen absolute values, then save/reload and race rendering. Test copies only
-until those checks pass. Live cart insertion was confirmed, but reopening the
-editor still reportedly resets its values; event diagnostics record initial,
-queued and purchased snapshots and profile/shop reset events to locate it.
+until those checks pass. Live cart insertion and correct current-value display
+after reopening were confirmed with the post-initialization redraw. Event
+diagnostics record initial, queued and purchased snapshots and profile/shop resets.
 
 Race ownership must be established before VehicleRenderConn::SetupLoading
 (PC 75D1A0), not just when Load returns: a committed load can synchronously copy
@@ -134,10 +134,14 @@ customization record (uiQRBrief exit). The profile host now owns WriteRideIntoRe
 (56F2F0), records that observed owned-car lineage, and lets the optional random
 adapter observe the same completed conversion. An unowned replacement invalidates
 the alias; matching equipment alone cannot inherit another car's saved stance.
+Native BuildRideForPlayer clears old bindings before reusing a RideInfo, including
+identical unowned cars. Conversion fingerprints include the preset key while
+excluding subsequent physics/tuning changes.
 
 Native IsCarStableDirty (57FC90) compares only the native car-stable backup. A
 stance-only purchase leaves those bytes unchanged, so the host also compares
 purchased extension values against BackupCarStable (57FC50). It combines the
 results while always allowing native checkpoint cleanup. Previews and queued
 items cannot trigger this save request; no dummy part or native data mutation is
-used. This restores the usual save flow on leaving My Cars / career shops.
+used. The usual save flow on leaving My Cars / career shops can therefore include
+stance-only purchases. The latest save and Quick Race changes still require live QA.

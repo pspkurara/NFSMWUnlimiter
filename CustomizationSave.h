@@ -406,6 +406,9 @@ static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t
 static const CustomizationProfileHost::Observer OwnedObserver={sizeof(CustomizationProfileHost::Observer),1,0x4F574E44,nullptr,
     &BeginOwnedSave,&EndOwnedSave,&OwnedSaveDone,&BeginOwnedLoad,&EndOwnedLoad};
 static void __fastcall Build(DWORD* stable,void*,uint32_t handle,int player,DWORD* ride) {
+    // BuildRideForPlayer also builds unowned cars into reused stack RideInfos.
+    // Identical parts at the same address do not prove the previous car's owner.
+    if(ride) {std::lock_guard<std::mutex> lock(Mutex);Rides.erase(ride);}
     OriginalBuild(stable,handle,player,ride);
     if(!ride||player!=0||stable!=Stable()) return;
     Key key;
@@ -452,8 +455,9 @@ static DWORD* __fastcall LoadedRide(DWORD* loaded,void*,DWORD* ride,int frontend
     return OriginalLoadedRide(loaded,ride,frontend,twoPlayers,player);
 }
 static uint64_t CustomizationFingerprint(const void* record) {
-    // Parts and record handle stay stable when native race tuning changes.
-    return (uint64_t(Crc(record,139*2))<<8)|reinterpret_cast<const BYTE*>(record)[0x194];
+    // Parts, preset key and record handle identify a conversion. Physics/tuning
+    // fields deliberately stay out: Quick Race updates those after conversion.
+    return (uint64_t(Crc(record,139*2))<<32)|Crc(reinterpret_cast<const BYTE*>(record)+0x190,5);
 }
 static bool CustomizationOwnerLocked(const void* customization,Key& owner) {
     auto stable=Stable();if(!stable||!customization)return false;

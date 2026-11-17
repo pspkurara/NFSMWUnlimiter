@@ -86,6 +86,7 @@ static bool __fastcall NativeStableDirty(DWORD* database,void*) {
 static void __fastcall NativeWriteRecord(void* record,void*,DWORD* ride) {
     std::memcpy(record,ride,sizeof(DWORD));
 }
+static void __fastcall NativeBuildUnowned(DWORD*,void*,uint32_t,int,DWORD*) {}
 int main() {
     directory=fs::current_path()/("save-fixture-"+std::to_string(GetCurrentProcessId()));
     fs::create_directories(directory/"NFS Most Wanted"/"Alpha");
@@ -242,6 +243,13 @@ int main() {
     WriteRecord(quickRace,nullptr,ride.data());
     Check(BindRaceCustomization(ai.data(),quickRace,0)&&Resolve(ai.data(),0,2,0)==-2.5f,
           "Reserved Quick Race record inherits only the explicitly converted owned RideInfo");
+    quickRace[0x190]^=1;
+    Check(!BindRaceCustomization(ai.data(),quickRace,0),"Changing only the preset key invalidates converted owned lineage");
+    quickRace[0x190]^=1;
+    quickRace[0x190]^=1;
+    Check(!BindRaceCustomization(ai.data(),quickRace,0),
+          "A changed preset cannot reuse owned lineage even with identical explicit parts");
+    quickRace[0x190]^=1;
     auto unowned=ride;
     WriteRecord(quickRace,nullptr,unowned.data());
     Check(!BindRaceCustomization(ai.data(),quickRace,0)&&Resolve(ai.data(),0,2,0)==0,
@@ -268,6 +276,10 @@ int main() {
     stable[5]=8;stable[8]=2;reinterpret_cast<BYTE*>(stable+5)[16]=1;
     Check(!BindRaceCustomization(ai.data(),customization,0),"ambiguous customization ownership fails closed");
     stable[5]=0xffffffff;
+    OriginalBuild=reinterpret_cast<BuildFn>(&NativeBuildUnowned);
+    Build(stable,nullptr,0x12345678,0,ride.data());
+    Check(Resolve(ride.data(),0,2,0)==0,
+          "Rebuilding an unowned identical car at the same RideInfo address drops its previous owner");
     ActiveEditorToken=0;Check(Edit(9,&value,1)==0,"Old editor token cannot stage");
     auto invalid=value;invalid.values[4]=NAN;Check(!ValidValues(invalid),"NaN rejected");
     invalid=value;invalid.mask=1u<<2;invalid.values[2]=-.1f;Check(!ValidValues(invalid),"Negative half-track rejected");
