@@ -169,3 +169,12 @@ the original TuningSlider::Draw, which force-restarts every title's UNHIGHLIGHT
 and slider group's INIT scripts. Normal focus navigation retains its native
 scripts; refreshing the absolute values no longer restarts every row's animation.
 This redraw change is built and fixture-tested, with visual confirmation pending.
+
+Footer prompts walk the complete native package, including all duplicate
+HELP_BUTTON states. Every matching state receives Copy, X: Reset and, when
+available, R3: Showcase prompts. Native package ownership handles cloned text
+objects on unload. The x86 fixture executes the real ForAllChildren/ForAllObjects
+instructions against duplicate and nested groups, verifying callback slot 1.
+Showcase also accepts PAD_BUTTON0, the mapped action used by native customization
+screens; direct R3/Space input remains available. Display and transitions need
+live confirmation after installation.

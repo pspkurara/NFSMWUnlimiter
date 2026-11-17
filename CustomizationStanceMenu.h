@@ -17,7 +17,7 @@ constexpr unsigned Category=0x8F1;
 constexpr const char* Package=CustomizationStanceAssets::Name;
 constexpr unsigned Pressed=0x0C407210,Accept=0x406415E3,Back=0x911AB364;
 constexpr unsigned Left=0x9120409E,Right=0xB5971BF1,PreviousAxle=0x5073EF13,NextAxle=0xD9FEEC59;
-constexpr unsigned Copy=0xC519BFC4,Inherit=0xC519BFC3,ExitComplete=0xE1FDE1D1;
+constexpr unsigned Copy=0xC519BFC4,Inherit=0xC519BFC3,Inspect=0xC519BFBF,ExitComplete=0xE1FDE1D1;
 static bool Installed=false,Constructing=false,BuildRequested=false,Opening=false,Closing=false,Finished=false;
 static DWORD* Screen=nullptr;
 static unsigned NameHash=0,PackageHash=0,OpeningArgs=0,ReturnArgs=1,ReturnIndex=1;
@@ -38,7 +38,8 @@ static void OpenShowcase();
 static bool ResetDialogAvailable=false;
 static unsigned ResetConfirmed=0,ResetAll=0,ResetDismissed=0,ResetAxle=0;
 static unsigned ResetSelectedLabel=0,ResetAllLabel=0;
-static std::array<DWORD*,2> ResetLabels{};
+struct FooterGroup {DWORD* object;std::array<DWORD*,2> reset{},showcase{};};
+static std::vector<FooterGroup> FooterGroups;
 static int ResetChannel=-1;
 static uint64_t ResetOwner=0;
 struct SavedText {DWORD* object;unsigned name,language,flags;std::wstring text;};
@@ -207,34 +208,43 @@ static void Text(unsigned hash,const char* text) {
     SetText(FEngFindObject(Package,hash),text);
 }
 static void Footer() {
-    auto group=FEngFindObject(Package,bStringHash("HELP_BUTTON"));
-    if(!group||group[0x18/4]!=5||group[0x60/4]>32)return;
-    // Work within the visible help group: the template contains another group
-    // with the same name, and its string hashes are not the visible shadow pair.
-    std::array<DWORD*,2> labels{};unsigned count=0;
-    auto child=reinterpret_cast<DWORD*>(group[0x64/4]);
-    for(unsigned i=0;i<group[0x60/4]&&child;++i,child=reinterpret_cast<DWORD*>(child[1])) {
-        if(child[0]==0x89B05C&&child!=ResetLabels[0]&&child!=ResetLabels[1]&&count<2)labels[count++]=child;
-    }
-    for(unsigned i=0;i<count;++i) {
-        SetText(labels[i],"Copy");
-        if(!ResetLabels[i]) {
-            ResetLabels[i]=FEngFindObject(Package,bStringHash(i?"MWCL_RESET_SHADOW":"MWCL_RESET_LABEL"));
+    auto package=reinterpret_cast<DWORD*(__thiscall*)(void*,const char*)>(0x516AF0)(
+        *reinterpret_cast<void**>(0x91CADC),Package);
+    if(!package)return;
+    // FindObjectByHash stops at the first match. Stock assets have several
+    // HELP_BUTTON groups for different states; the first can be hidden.
+    CustomizationFrontendList::GroupsByName<DWORD> found(bStringHash("HELP_BUTTON"));
+    reinterpret_cast<bool(__thiscall*)(DWORD*,CustomizationFrontendList::GroupsByName<DWORD>*)>(0x5B1560)(package,&found);
+    for(auto group:found.groups) {
+        if(group[0x60/4]>32)continue;
+        auto at=std::find_if(FooterGroups.begin(),FooterGroups.end(),[group](const auto& value){return value.object==group;});
+        if(at==FooterGroups.end()){FooterGroups.push_back({group});at=FooterGroups.end()-1;}
+        std::array<DWORD*,2> labels{};unsigned count=0;
+        auto child=reinterpret_cast<DWORD*>(group[0x64/4]);
+        for(unsigned i=0;i<group[0x60/4]&&child;++i,child=reinterpret_cast<DWORD*>(child[1])) {
+            if(child[0]==0x89B05C&&child!=at->reset[0]&&child!=at->reset[1]&&
+               child!=at->showcase[0]&&child!=at->showcase[1]&&count<2)labels[count++]=child;
         }
-        if(!ResetLabels[i]) {
-            auto clone=(*reinterpret_cast<DWORD*(__thiscall**)(DWORD*,bool)>(labels[i][0]+4))(labels[i],false);
-            if(!clone)continue;
-            clone[0x10/4]=bStringHash(i?"MWCL_RESET_SHADOW":"MWCL_RESET_LABEL");
-            clone[0x58/4]=0; // Render cache belongs to the source, never the clone.
-            CustomizationFrontendList::AppendChild(group,clone,FEMinList_AddNode);
-            ResetLabels[i]=clone;
+        for(unsigned i=0;i<count;++i) {
+            SetText(labels[i],"Copy");
+            for(unsigned action=0;action<(ShowcaseAvailable?2u:1u);++action) {
+                auto& prompt=action?at->showcase[i]:at->reset[i];
+                if(!prompt) {
+                    prompt=(*reinterpret_cast<DWORD*(__thiscall**)(DWORD*,bool)>(labels[i][0]+4))(labels[i],false);
+                    if(!prompt)continue;
+                    char name[64]{};sprintf_s(name,"MWCL_FOOTER_%u_%u_%u",unsigned(at-FooterGroups.begin()),action,i);
+                    prompt[0x10/4]=bStringHash(name);
+                    prompt[0x58/4]=0; // Native package owns clone; its render cache must be fresh.
+                    CustomizationFrontendList::AppendChild(group,prompt,FEMinList_AddNode);
+                }
+                auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);
+                if(data&&labels[i][0x30/4]>=0x44) {
+                    float position[]={data[7]-(action?300.f:130.f),data[8],data[9]};
+                    reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(prompt,position,false);
+                }
+                SetText(prompt,action?"R3: Showcase":"X: Reset",false);
+            }
         }
-        auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);
-        if(data&&labels[i][0x30/4]>=0x44) {
-            float position[]={data[7]-130.f,data[8],data[9]};
-            reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(ResetLabels[i],position,false);
-        }
-        SetText(ResetLabels[i],"X: Reset",false);
     }
 }
 static void Heading(const char* error=nullptr) {
@@ -264,7 +274,9 @@ static void Heading(const char* error=nullptr) {
         "A: cart   LT/RT: axle   X: Reset   Shift: fine   Ctrl: fast");
 }
 static void OpenShowcase() {
-    if(!ShowcaseAvailable||!Screen||Closing||ResetChannel>=0||!Current())return;
+    if(!ShowcaseAvailable||!Screen||Closing||ResetChannel>=0||!Current()) {
+        CustomizationSave::Log("Stance Showcase request rejected: unavailable screen or edit lease.");return;
+    }
     const int selected=SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4]));
     ShowcaseSelection=selected>=0?unsigned(selected):0;
     // Native Showcase owns its camera, package and normal A/B return path.
@@ -275,6 +287,7 @@ static void OpenShowcase() {
     *reinterpret_cast<unsigned*>(0x9B9E84)=0;
     *reinterpret_cast<unsigned*>(0x9B9E88)=0;
     ShowcaseAway=true;ShowcaseReturning=false;Closing=true;
+    CustomizationSave::Log("Stance editor switching to native Showcase.");
     auto queue=reinterpret_cast<void(__thiscall*)(void*,const char*,unsigned,unsigned,bool)>(0x525940);
     queue(*reinterpret_cast<void**>(0x91CADC),"Showcase.fng",0,0,false);
 }
@@ -429,6 +442,9 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
         auto selected=reinterpret_cast<DWORD*>(screen[0x34/4]);const int index=SliderIndex(selected);
         if(index>=0&&index<6)ShowResetHelp(unsigned(index));return;
     }
+    // Use the same mapped frontend action as native customization screens,
+    // in addition to the R3/Space convenience input polled by Tick.
+    if(message==Inspect){OpenShowcase();return;}
     // UIWidgetMenu also handles text-input widgets and destructive screen resets.
     // TuningSlider has neither layout: forward only verified navigation/draw paths.
     switch(message) {
@@ -489,7 +505,7 @@ static void __fastcall Destructor(DWORD* screen,void*) {
         RestoreText();Screen=nullptr;Sliders.fill(nullptr);Closing=false;RefreshPending=false;
         if(!suspend){Owner=0;Opening=false;}
         ResetChannel=-1;ResetOwner=0;
-        ResetLabels={};
+        FooterGroups.clear();
     }
     OriginalDestructor(screen);
 }
