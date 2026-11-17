@@ -31,10 +31,9 @@ static Session EditSession;
 static std::array<DWORD*,7> Sliders{};
 static bool RefreshPending=false;
 static void Refresh();
-static bool Inspecting=false,InspectHeld=false;
-struct HiddenWidget {DWORD* object;unsigned visibility;};
-static std::vector<HiddenWidget> HiddenWidgets;
-static void SetInspection(bool enabled);
+static bool ShowcaseAway=false,ShowcaseReturning=false,InspectHeld=false,ShowcaseAvailable=false;
+static unsigned ShowcaseSelection=0;
+static void OpenShowcase();
 static bool ResetDialogAvailable=false;
 static unsigned ResetConfirmed=0,ResetAll=0,ResetDismissed=0,ResetAxle=0;
 static unsigned ResetSelectedLabel=0,ResetAllLabel=0;
@@ -81,7 +80,7 @@ using DrawFn=void(__thiscall*)(DWORD*);
 using ActFn=void(__thiscall*)(DWORD*,const char*,unsigned);
 using ReactFn=void(__thiscall*)(DWORD*,const char*,unsigned,void*,unsigned,unsigned);
 static SetupFn OriginalSetup=nullptr,OriginalDestructor=nullptr;
-static NotifyFn OriginalNotify=nullptr;
+static NotifyFn OriginalNotify=nullptr,OriginalShowcaseNotify=nullptr;
 static FactoryFn OriginalFactory=nullptr;
 static DrawFn OriginalDraw=nullptr;
 static ActFn OriginalAct=nullptr;
@@ -163,6 +162,7 @@ static int Host(const Values* values,int action) {
 }
 static void Cancel() {
     ResetChannel=-1;ResetOwner=0;
+    ShowcaseAway=false;ShowcaseReturning=false;
     if(Owner&&!Finished)CustomizationSave::CancelShop(Owner);
     if(Owner&&!Finished)Host(nullptr,2);
     if(Control&&EditSession.info.token)Control(EditSession.info.token,2,0);
@@ -188,7 +188,7 @@ static void Tick() {
             if(CustomizationCamera::GetPadState&&CustomizationCamera::GetPadState(CustomizationControls::Runtime().controller,&pad)==ERROR_SUCCESS)
                 held|=(pad.Gamepad.wButtons&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
         }
-        if(held&&!InspectHeld)SetInspection(!Inspecting);
+        if(held&&!InspectHeld)OpenShowcase();
         InspectHeld=held;
     }
     // Setup runs inside the native constructor, before the package's initial
@@ -216,7 +216,7 @@ static void Footer() {
         if(child[0]==0x89B05C&&child!=ResetLabels[0]&&child!=ResetLabels[1]&&count<2)labels[count++]=child;
     }
     for(unsigned i=0;i<count;++i) {
-        SetText(labels[i],Inspecting?"Return":"Copy");
+        SetText(labels[i],"Copy");
         if(!ResetLabels[i]) {
             ResetLabels[i]=FEngFindObject(Package,bStringHash(i?"MWCL_RESET_SHADOW":"MWCL_RESET_LABEL"));
         }
@@ -233,7 +233,7 @@ static void Footer() {
             float position[]={data[7]-130.f,data[8],data[9]};
             reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(ResetLabels[i],position,false);
         }
-        SetText(ResetLabels[i],Inspecting?"":"X: Reset",false);
+        SetText(ResetLabels[i],"X: Reset",false);
     }
 }
 static void Heading(const char* error=nullptr) {
@@ -259,34 +259,48 @@ static void Heading(const char* error=nullptr) {
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
     Footer();
-    Text(0x05CDDED4,Inspecting?"R3 / Space / B: Return to stance adjustment":"R3 / Space: Showcase   A: cart   LT/RT: axle   Shift: fine   Ctrl: fast");
+    Text(0x05CDDED4,ShowcaseAvailable?"R3 / Space: Showcase   A: cart   LT/RT: axle   Shift: fine   Ctrl: fast":
+        "A: cart   LT/RT: axle   X: Reset   Shift: fine   Ctrl: fast");
 }
-static void SetInspection(bool enabled) {
-    if(enabled==Inspecting)return;
-    Inspecting=enabled;
-    if(enabled) {
-        const auto hide=[](DWORD* object) {
-            if(!object)return;
-            for(const auto& saved:HiddenWidgets)if(saved.object==object)return;
-            HiddenWidgets.push_back({object,object[0x1C/4]&3u});FEngSetInvisible(object);
-        };
-        for(auto slider:Sliders)if(slider) {
-            hide(reinterpret_cast<DWORD*>(slider[0x2C/4]));
-            hide(reinterpret_cast<DWORD*>(slider[0x30/4]));
-            hide(reinterpret_cast<DWORD*>(slider[0x5C/4]));
+static void OpenShowcase() {
+    if(!ShowcaseAvailable||!Screen||Closing||ResetChannel>=0||!Current())return;
+    const int selected=SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4]));
+    ShowcaseSelection=selected>=0?unsigned(selected):0;
+    // Native Showcase owns its camera, package and normal A/B return path.
+    // Only its return destination is our reserved package/category. The edit
+    // lease and preview outlive the temporary destruction of our MenuScreen.
+    *reinterpret_cast<const char**>(0x905E34)=Package;
+    *reinterpret_cast<unsigned*>(0x9B9E80)=OpeningArgs;
+    *reinterpret_cast<unsigned*>(0x9B9E84)=0;
+    *reinterpret_cast<unsigned*>(0x9B9E88)=0;
+    ShowcaseAway=true;ShowcaseReturning=false;Closing=true;
+    auto queue=reinterpret_cast<void(__thiscall*)(void*,const char*,unsigned,unsigned,bool)>(0x525940);
+    queue(*reinterpret_cast<void**>(0x91CADC),"Showcase.fng",0,0,false);
+}
+static void __fastcall ShowcaseNotify(DWORD* screen,void*,unsigned message,void* object,unsigned p1,unsigned p2) {
+    if(ShowcaseAway&&*reinterpret_cast<const char**>(0x905E34)==Package&&(message==Accept||message==Back)) {
+        // Arm reconstruction only when the stock screen actually returns; an
+        // arbitrarily long inspection must not trip the menu-open watchdog.
+        Opening=true;OpenedAt=GetTickCount64();ShowcaseReturning=true;
+        if(!Current()) {
+            Cancel();ShowcaseAway=false;ShowcaseReturning=false;Opening=false;
+            *reinterpret_cast<const char**>(0x905E34)=Parent.c_str();
+            *reinterpret_cast<unsigned*>(0x9B9E80)=ReturnArgs;
         }
-        hide(FEngFindObject(Package,bStringHash("HEADER_TEXT_MAIN")));
-        hide(FEngFindObject(Package,bStringHash("HEADER_TEXT_SHADOW")));
-    } else {
-        for(const auto& saved:HiddenWidgets) {
-            saved.object[0x1C/4]=(saved.object[0x1C/4]&~3u)|saved.visibility|0x02400000u;
-        }
-        HiddenWidgets.clear();RefreshPending=true;
     }
-    Heading();
+    OriginalShowcaseNotify(screen,message,object,p1,p2);
+}
+static void InstallShowcase() {
+    constexpr uintptr_t address=0x7A48F0;
+    const BYTE entry[]={0x8B,0x44,0x24,0x04,0x3D,0xE3,0x15,0x64,0x40,0x56,0x8B,0xF1};
+    if(std::memcmp(reinterpret_cast<const void*>(address),entry,sizeof(entry))||
+       MH_CreateHook(reinterpret_cast<void*>(address),&ShowcaseNotify,reinterpret_cast<void**>(&OriginalShowcaseNotify))!=MH_OK)return;
+    if(MH_EnableHook(reinterpret_cast<void*>(address))!=MH_OK) {
+        MH_RemoveHook(reinterpret_cast<void*>(address));OriginalShowcaseNotify=nullptr;return;
+    }
+    ShowcaseAvailable=true;
 }
 static void __fastcall Draw(DWORD* slider,void*) {
-    if(Screen&&Inspecting&&SliderIndex(slider)>=0)return;
     const int index=SliderIndex(slider);
     if(Screen&&index>=0) {
         Remember(reinterpret_cast<DWORD*>(slider[0x2C/4]));
@@ -373,6 +387,7 @@ static bool Commit() {
 static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,unsigned p1,unsigned p2) {
     if(screen!=Screen){OriginalNotify(screen,message,object,p1,p2);return;}
     if(message==ExitComplete) {
+        if(ShowcaseAway&&!ShowcaseReturning)return;
         if(!Finished)Cancel();
         auto queue=reinterpret_cast<void(__thiscall*)(void*,const char*,unsigned,unsigned,bool)>(0x525940);
         queue(*reinterpret_cast<void**>(0x91CADC),Parent.empty()?*reinterpret_cast<const char**>(g_pCustomizeSubPkg):Parent.c_str(),ReturnArgs,0,false);
@@ -380,10 +395,6 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(Closing)return;
     if(!Current()){Cancel();Leave();return;}
-    if(Inspecting) {
-        if(message==Back||message==Accept||message==Copy)SetInspection(false);
-        return;
-    }
     if(message==ResetConfirmed||message==ResetAll||message==ResetDismissed) {
         const int channel=ResetChannel;const auto axle=ResetAxle;const auto owner=ResetOwner;
         ResetChannel=-1;ResetOwner=0;
@@ -431,7 +442,8 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
 }
 static void __fastcall Setup(DWORD* screen,void*) {
     if(!Constructing){OriginalSetup(screen);return;}
-    Screen=screen;Opening=false;Closing=false;Sliders.fill(nullptr);
+    const bool returning=ShowcaseReturning;
+    Screen=screen;Opening=false;Closing=false;ShowcaseAway=false;ShowcaseReturning=false;Sliders.fill(nullptr);
     CustomizationSave::Log("Stance screen constructing native sliders.");
     *reinterpret_cast<BYTE*>(reinterpret_cast<BYTE*>(screen)+0x20)=1; // MenuScreen::IsGarageScreen (PC ctor 5862C6).
     if(!BuildRequested||!Current()){Cancel();return;}
@@ -452,7 +464,7 @@ static void __fastcall Setup(DWORD* screen,void*) {
         *reinterpret_cast<BYTE*>(reinterpret_cast<BYTE*>(slider)+0xF0)=1;
         Sliders[i]=slider;
     }
-    Refresh();reinterpret_cast<void(__thiscall*)(DWORD*,int)>(0x5A5EA0)(screen,1);
+    Refresh();reinterpret_cast<void(__thiscall*)(DWORD*,int)>(0x5A5EA0)(screen,returning?int(ShowcaseSelection+1):1);
     RefreshPending=true;
     Heading();CustomizationSave::Log("Stance screen sliders ready.");
 }
@@ -466,8 +478,11 @@ static DWORD* __cdecl Factory(DWORD* data) {
 }
 static void __fastcall Destructor(DWORD* screen,void*) {
     if(screen==Screen) {
-        SetInspection(false);InspectHeld=false;
-        if(!Finished)Cancel();RestoreText();Screen=nullptr;Sliders.fill(nullptr);Owner=0;Opening=false;Closing=false;RefreshPending=false;
+        const bool suspend=ShowcaseAway&&!ShowcaseReturning&&!Finished;
+        if(!suspend)InspectHeld=false;
+        if(!suspend&&!Finished)Cancel();
+        RestoreText();Screen=nullptr;Sliders.fill(nullptr);Closing=false;RefreshPending=false;
+        if(!suspend){Owner=0;Opening=false;}
         ResetChannel=-1;ResetOwner=0;
         ResetLabels={};
     }
@@ -475,7 +490,7 @@ static void __fastcall Destructor(DWORD* screen,void*) {
 }
 static void __fastcall React(DWORD* option,void*,const char* parent,unsigned message,void* object,unsigned p1,unsigned p2) {
     if((option[0x50/4]&0xFFFF)!=Category){OriginalReact(option,parent,message,object,p1,p2);return;}
-    if(message!=Pressed||Screen||Opening||!Core()||!Asset())return;
+    if(message!=Pressed||Screen||Opening||ShowcaseAway||!Core()||!Asset())return;
     uint64_t owner=0;CustomizationSave::Values values;
     if(!CustomizationSave::NativeMenuOwner(owner,values))return;
     MenuInfo info;
@@ -585,6 +600,7 @@ static bool Install() {
     }
     Installed=true;
     InstallGarageView();
+    InstallShowcase();
     CustomizationSave::Log("Native body-shop stance menu installed (free grouped adjustment).");return true;
 }
 }

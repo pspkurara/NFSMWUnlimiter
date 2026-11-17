@@ -18,12 +18,18 @@ existing deadzone/inversion settings remain in charge. Other packages retain
 their original metadata. An unknown/occupied camera hook disables this optional
 view only. Actual orbit/mouse behavior still requires live validation.
 
-R3 (right-stick click) or Space toggles an in-place Showcase inspection view:
-slider groups and the heading are hidden while the same preview/session remains
-active. R3/Space, B, A or Y returns to adjustment without queuing or purchasing
-anything. This does not switch to the stock Showcase package or rebuild the car.
-The footer advertises the shortcut. Inputs are polled only while this editor is
-active and the game has foreground focus; a reset dialog blocks the shortcut.
+R3 (right-stick click) or Space switches to the actual native **Showcase.fng**
+screen. Its return package is our reserved **MWCL_Stance_Editor.fng**, with the
+same reserved category/arguments. The stance screen is destroyed/reconstructed,
+but its edit lease, absolute values, axle scope and selected row survive this
+trip. Native A/B returns without queuing or purchasing anything. The footer
+advertises the shortcut. Inputs are polled only while this editor is active and
+the game has foreground focus; a reset dialog blocks the shortcut. A guarded
+observer of the native Showcase return notification arms reconstruction; other
+Showcase callers keep their normal path. Inspection itself has no time limit.
+If the owner/profile changes, return is redirected to the parent shop and the
+old edit is discarded. An unavailable return hook disables the shortcut only.
+Actual transition, retained preview and A/B return still require live checks.
 
 The visible Y help-group strings are relabelled **Copy**, including their
 shadow. An adjacent **X: Reset** hint is cloned from those installed strings,
