@@ -163,3 +163,9 @@ evidence. Career races/free roam, Quick Race, and randomized opponents still nee
 separate runtime checks; passing a synthetic copy fixture cannot establish them.
 The latest live stance-only purchase did request the normal save flow and commit
 the owned-car sidecar after native SaveDone. Reload persistence still needs QA.
+
+Tagged stance sliders redraw their two native meters directly rather than calling
+the original TuningSlider::Draw, which force-restarts every title's UNHIGHLIGHT
+and slider group's INIT scripts. Normal focus navigation retains its native
+scripts; refreshing the absolute values no longer restarts every row's animation.
+This redraw change is built and fixture-tested, with visual confirmation pending.

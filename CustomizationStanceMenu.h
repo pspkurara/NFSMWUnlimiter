@@ -303,12 +303,16 @@ static void InstallShowcase() {
 }
 static void __fastcall Draw(DWORD* slider,void*) {
     const int index=SliderIndex(slider);
-    if(Screen&&index>=0) {
-        Remember(reinterpret_cast<DWORD*>(slider[0x2C/4]));
-        Remember(reinterpret_cast<DWORD*>(slider[0x30/4]));
+    if(!Screen||index<0){OriginalDraw(slider);return;}
+    Remember(reinterpret_cast<DWORD*>(slider[0x2C/4]));
+    Remember(reinterpret_cast<DWORD*>(slider[0x30/4]));
+    // Stock Draw restarts UNHIGHLIGHT/INIT on every call. Refreshing all absolute
+    // values would therefore flash every title. Redraw its two native meters
+    // directly (verified PC 575D4C..575D65); focus scripts keep their normal life.
+    for(const auto offset:{0x60u,0x9Cu}) {
+        auto meter=slider+offset/4;
+        (*reinterpret_cast<DrawFn*>(meter[0]+0x24))(meter);
     }
-    OriginalDraw(slider);
-    if(!Screen||index<0)return;
     auto title=reinterpret_cast<DWORD*>(slider[0x2C/4]);
     auto data=reinterpret_cast<DWORD*>(slider[0x30/4]);
     if(!title||title[0]!=0x89B05C)return;
