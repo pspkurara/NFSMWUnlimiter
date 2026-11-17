@@ -192,12 +192,11 @@ language hash 61D8F34F. Extra PC prompts use a separate row to avoid Accept/Canc
 The native traversal fixture covers this library-expanded, differently named
 group. Installation and visible confirmation of this correction remain pending.
 
-Space also failed to enter Showcase in the original session, despite an installed
-Showcase notification hook and available=true in memory. The independent screen
-now handles native SCREEN_TICK (C98356BA) itself, so input polling does not depend
-on CarViewer's conditional joystick-update call site. Showcase receives the
-active FECarRecord argument, as native customization does. Transition/return and
-preview retention still require runtime verification; this is not a confirmed fix.
+The user corrected the initial Space result: Space does enter Showcase in the
+original session. The extra SCREEN_TICK polling proposed from the initial report
+was removed; the existing frame observer works. Controller activation and return
+with preview retention still require confirmation. Showcase now receives the
+active FECarRecord argument, as native customization does.
 
 Deferred presentation request: keep the header to Stance | Both/Front/Rear,
 put units beside each channel, and add right-aligned limit labels on each row.

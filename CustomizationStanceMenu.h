@@ -426,9 +426,6 @@ static bool Commit() {
 }
 static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,unsigned p1,unsigned p2) {
     if(screen!=Screen){OriginalNotify(screen,message,object,p1,p2);return;}
-    // The independent screen receives the standard screen tick even when its
-    // package/camera state bypasses CarViewer's joystick-update call site.
-    if(message==0xC98356BA){Tick();return;}
     if(message==ExitComplete) {
         if(ShowcaseAway&&!ShowcaseReturning)return;
         if(!Finished)Cancel();
