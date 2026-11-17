@@ -59,11 +59,9 @@ native controls, save/restart, garage menus and driver previews still require QA
 before this development product is called supported. Profile registry/native
 transaction tests continue separately. No mandatory shared runtime ASI was added.
 
-`tools/package_camera.py` builds/tests the camera product and produces a binary
-package plus a source archive containing only its dependencies and standalone
-CMake entry point. It is suitable for a separate repository later; it contains
-no proprietary game data. The current stance test installation is not changed
-by building or packaging this product.
+The standalone CMake entry point builds this product from these shared headers,
+its bundled dependency sources and its own test fixtures. It contains no game
+data or required companion binary and can be moved into a separate repository.
 
 ## Camera contexts
 
