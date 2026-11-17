@@ -63,6 +63,13 @@ static std::map<Key,uint64_t> Tokens;
 static uint64_t NextToken = 1;
 static uint64_t ActiveEditorToken = 0;
 static std::string Profile, SavingProfile;
+// Event-only diagnostics: no per-frame file access.
+static void TraceShop(const char* event,uint64_t token,const Values& values) {
+    char line[256]{};
+    sprintf_s(line,"Stance %s owner=%llu mask=%03X height=[%.6g %.6g]",event,
+        static_cast<unsigned long long>(token),values.mask,double(values.values[0]),double(values.values[1]));
+    Log(line);
+}
 static bool HooksReady = false, SaveCaptured = false;
 static void(__cdecl* RegisterEditor)(int(__cdecl*)(uint64_t,const Values*,int)) = nullptr;
 static void(__cdecl* SetOwnedContext)(uint64_t,const Values*) = nullptr;
@@ -103,6 +110,7 @@ static bool CurrentKey(const Key& key) {
     return false;
 }
 static void LoadLocked(const std::string& name) {
+    Log("Stance state reset: native profile loaded or changed.");
     if(TransientReset)TransientReset();
     Profile=name; Pending.clear();Preview.clear();Shop.Clear();Rides.clear();CustomizationCopies.clear();Tokens.clear();ActiveEditorToken=0;
     Saving.clear();SaveCaptured=false;SavingProfile.clear();
@@ -221,7 +229,9 @@ static bool CancelShop(uint64_t token) {
 }
 static uint64_t AcceptShop(uint64_t token) {
     std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
-    return token==ActiveEditorToken?Shop.Accept(token):0;
+    const auto revision=token==ActiveEditorToken?Shop.Accept(token):0;
+    if(revision)TraceShop("queued",token,Shop.Cart(token)->snapshot.values);
+    return revision;
 }
 static bool RemoveShop(uint64_t token,uint64_t revision) {
     std::lock_guard<std::mutex> lock(Mutex);return Shop.Remove(token,revision);
@@ -239,6 +249,7 @@ static bool EndShopCheckout(uint64_t token,bool succeeded) {
         const auto purchased=Shop.EndCheckout(token,succeeded);
         if(!purchased)return !succeeded;
         if(purchased->values.mask)Pending[entry.first]=purchased->values;else Pending.erase(entry.first);
+        TraceShop("purchased",token,purchased->values);
         return true;
     }
     Shop.Clear();return false;
@@ -351,6 +362,7 @@ static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t
     if(!native&&backup!=Backups.end()&&backup->second.profile==name) {
         if(TransientReset)TransientReset();
         Profile=name;Pending=backup->second.pending;Preview.clear();Shop.Clear();Tokens.clear();Rides.clear();CustomizationCopies.clear();
+        Log("Stance state reset: native memory snapshot restored.");
     } else {LoadLocked(name);Backups.clear();}
 }
 static const CustomizationProfileHost::Observer OwnedObserver={sizeof(CustomizationProfileHost::Observer),1,0x4F574E44,nullptr,
@@ -469,7 +481,28 @@ static bool BindRaceCustomization(DWORD* ride,const void* customization,int usag
 }
 using RaceLoadFn=bool(__thiscall*)(DWORD*,unsigned,int,bool,const void*);
 static RaceLoadFn OriginalRaceLoad=nullptr;
+struct RaceLoadContext {DWORD* connection;const void* customization;int usage;};
+static thread_local const RaceLoadContext* ActiveRaceLoad=nullptr;
+using SetupLoadingFn=void(__thiscall*)(DWORD*,bool);
+static SetupLoadingFn OriginalSetupLoading=nullptr;
+static void __fastcall SetupLoading(DWORD* connection,void*,bool commit) {
+    // SetupLoading can synchronously copy RideInfo into LoadedRideInfo. Establish
+    // ownership before that copy; binding only after Load returns is too late.
+    if(ActiveRaceLoad&&ActiveRaceLoad->connection==connection) {
+        const bool bound=BindRaceCustomization(reinterpret_cast<DWORD*>(connection[0x40/4]),
+            ActiveRaceLoad->customization,ActiveRaceLoad->usage);
+        if(ActiveRaceLoad->usage==0)Log(bound?"Race stance owner bound before loader copy.":
+            "Race stance owner unresolved before loader copy.");
+    }
+    OriginalSetupLoading(connection,commit);
+}
 static bool __fastcall LoadRace(DWORD* connection,void*,unsigned world,int usage,bool commit,const void* customization) {
+    const RaceLoadContext context{connection,customization,usage};
+    struct Scope {
+        const RaceLoadContext* previous=ActiveRaceLoad;
+        explicit Scope(const RaceLoadContext* current){ActiveRaceLoad=current;}
+        ~Scope(){ActiveRaceLoad=previous;}
+    } scope(&context);
     const bool result=OriginalRaceLoad(connection,world,usage,commit,customization);
     if(result)BindRaceCustomization(reinterpret_cast<DWORD*>(connection[0x40/4]),customization,usage);
     return result;
@@ -495,6 +528,7 @@ static bool Install() {
         {0x5910E0,&Build,reinterpret_cast<void**>(&OriginalBuild),{0x8B,0x54,0x24,4,0x53,0x57}},
         {0x590380,&NewCar,reinterpret_cast<void**>(&OriginalNew),{0x56,0x33,0xF6,0x8B,0xC1,0x83,0x38,0xFF}},
         {0x75D220,&LoadRace,reinterpret_cast<void**>(&OriginalRaceLoad),{0x56,0x8B,0xF1,0x8B,0x46,0x44}},
+        {0x75D1A0,&SetupLoading,reinterpret_cast<void**>(&OriginalSetupLoading),{0x64,0xA1,0,0,0,0}},
         {0x689361,&CustomizationCopyCave,&OriginalCustomizationCopy,{0xB9,0x66,0,0,0,0x8B,0xF8,0xF3,0xA5}},
         {0x7A9DB0,&SetViewerRide,reinterpret_cast<void**>(&OriginalSetViewerRide),{0x8B,0x0D,0xDC,0xCA,0x91,0}},
         {0x7609B0,&ReInit,reinterpret_cast<void**>(&OriginalReInit),{0x64,0xA1,0,0,0,0}},

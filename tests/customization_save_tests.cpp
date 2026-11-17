@@ -68,6 +68,15 @@ static void __declspec(naked) NativeCustomizationCopyFixture() {
         rep movsd
         ret }
 }
+static std::vector<DWORD> raceLoaded(0x310/4);
+static void __fastcall SynchronousSetupLoading(DWORD* connection,void*,bool) {
+    auto source=reinterpret_cast<DWORD*>(connection[0x40/4]);
+    std::memcpy(raceLoaded.data(),source,0x310);
+    Check(TrackRideCopy(source,raceLoaded.data()),"Race loader copy already has owned lineage");
+}
+static bool __fastcall SynchronousRaceLoad(DWORD* connection,void*,unsigned,int,bool commit,const void*) {
+    SetupLoading(connection,nullptr,commit);return true;
+}
 int main() {
     directory=fs::current_path()/("save-fixture-"+std::to_string(GetCurrentProcessId()));
     fs::create_directories(directory/"NFS Most Wanted"/"Alpha");
@@ -200,6 +209,13 @@ int main() {
     customization[0x194]=1;
     Check(BindRaceCustomization(ai.data(),customization,0)&&Resolve(ai.data(),0,2,0)==-2.5f,
         "local-player render load inherits the exact native profile customization record");
+    Rides.erase(ai.data());
+    DWORD connection[0x48/4]{};connection[0x40/4]=reinterpret_cast<DWORD>(ai.data());
+    OriginalSetupLoading=reinterpret_cast<SetupLoadingFn>(&SynchronousSetupLoading);
+    OriginalRaceLoad=reinterpret_cast<RaceLoadFn>(&SynchronousRaceLoad);
+    Check(LoadRace(connection,nullptr,1,0,true,customization)&&
+          Resolve(raceLoaded.data(),0,2,0)==-2.5f&&!ActiveRaceLoad,
+          "Synchronous first race car copy retains purchased stance and releases load scope");
     Check(!BindRaceCustomization(ai.data(),customization,2)&&Resolve(ai.data(),0,2,0)==0,
         "AI usage and reused RideInfo allocation discard owned stance");
     std::array<BYTE,0x198> copied{};std::memcpy(copied.data(),customization,copied.size());

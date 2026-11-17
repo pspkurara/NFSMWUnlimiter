@@ -34,6 +34,7 @@ static bool Core() {
     return CoreControl!=nullptr;
 }
 static void Clear() {
+    CustomizationSave::Log("Stance state reset: shop relinquished control.");
     if(Core()&&Owner)CoreControl(Owner,2,0);
     std::lock_guard<std::mutex> lock(CustomizationSave::Mutex);
     CustomizationSave::Shop.Clear();AppliedEnabled.reset();

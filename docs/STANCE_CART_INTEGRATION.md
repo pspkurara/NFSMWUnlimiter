@@ -119,5 +119,12 @@ Live validation requires a zero-cost stance-only cart and a mixed native-part
 cart in both My Cars and career shop: preview, reopen unchanged, cancel editor,
 remove item, discard all, purchase once,
 reopen absolute values, then save/reload and race rendering. Test copies only
-until those checks pass. The currently running test still uses direct-commit
-5b5f760 and must not be described as having this integration.
+until those checks pass. Live cart insertion was confirmed, but reopening the
+editor still reportedly resets its values; event diagnostics record initial,
+queued and purchased snapshots and profile/shop reset events to locate it.
+
+Race ownership must be established before VehicleRenderConn::SetupLoading
+(PC 75D1A0), not just when Load returns: a committed load can synchronously copy
+RideInfo into the loader. A scoped load context binds the exact owned native
+customization before that copy. A regression fixture resolves purchased values
+from the first synchronous loader copy; actual race rendering still needs QA.

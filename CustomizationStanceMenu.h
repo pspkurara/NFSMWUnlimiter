@@ -330,6 +330,7 @@ static void __fastcall React(DWORD* option,void*,const char* parent,unsigned mes
     if(!Begin(owner,&info))return;
     if(!CustomizationSave::BeginShop(owner,info.enabled!=0)){Control(info.token,2,0);return;}
     Values initial;std::memcpy(&initial,&values,sizeof(initial));
+    CustomizationSave::TraceShop("menu initial",owner,values);
     if(!EditSession.Begin(info,initial)){CustomizationSave::CancelShop(owner);Control(info.token,2,0);return;}
     Owner=owner;Finished=false;Closing=false;Opening=true;OpenedAt=GetTickCount64();
     OpeningArgs=option[0x50/4];Parent=parent?parent:"";
