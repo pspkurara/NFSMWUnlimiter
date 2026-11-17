@@ -2,6 +2,7 @@
 #include "CustomizationSave.h"
 #include "CustomizationStanceSession.h"
 #include "CustomizationStanceAssets.h"
+#include "CustomizationFrontendList.h"
 #include <array>
 #include <string>
 #include <cstdio>
@@ -225,7 +226,7 @@ static void Footer() {
             if(!clone)continue;
             clone[0x10/4]=bStringHash(i?"MWCL_RESET_SHADOW":"MWCL_RESET_LABEL");
             clone[0x58/4]=0; // Render cache belongs to the source, never the clone.
-            FEMinList_AddNode(group+0x5C/4,reinterpret_cast<DWORD*>(group[0x68/4]),clone);
+            CustomizationFrontendList::AppendChild(group,clone,FEMinList_AddNode);
             ResetLabels[i]=clone;
         }
         auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);

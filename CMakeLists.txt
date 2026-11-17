@@ -60,6 +60,10 @@ add_executable(customization_stance_assets_tests tests/customization_stance_asse
 target_compile_options(customization_stance_assets_tests PRIVATE /W4 /utf-8 /EHsc)
 add_test(NAME customization_stance_assets COMMAND customization_stance_assets_tests)
 
+add_executable(customization_frontend_list_tests tests/customization_frontend_list_tests.cpp)
+target_compile_options(customization_frontend_list_tests PRIVATE /W4 /utf-8 /EHsc)
+add_test(NAME customization_frontend_list COMMAND customization_frontend_list_tests)
+
 add_executable(customization_random_tests tests/customization_random_tests.cpp)
 target_link_libraries(customization_random_tests PRIVATE minhook bcrypt)
 target_compile_definitions(customization_random_tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)

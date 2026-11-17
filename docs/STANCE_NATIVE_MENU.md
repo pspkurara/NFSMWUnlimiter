@@ -31,6 +31,18 @@ If the owner/profile changes, return is redirected to the parent shop and the
 old edit is discarded. An unavailable return hook disables the shortcut only.
 Actual transition, retained preview and A/B return still require live checks.
 
+### Footer insertion crash, 2026-11-18
+
+Opening stance with build a2a9c25 crashed before slider setup completed. WER dump
+`speed.exe.6188.dmp` identifies access violation 5B217B inside the native list
+inserter: the new footer string and predecessor were reversed. PC 5B2160 reads
+the new node from stack+4 and predecessor from stack+8, contrary to the console
+declaration's parameter order. `CustomizationFrontendList::AppendChild` now owns
+that PC adapter. Its regression test executes the inspected relocation-free
+x86 function bytes with empty/populated lists and ABADCAFE unlinked sentinels;
+it checks count, head, tail and both links after each insertion. This verifies
+the ABI fix, while actual footer layout still requires a game check.
+
 The visible Y help-group strings are relabelled **Copy**, including their
 shadow. An adjacent **X: Reset** hint is cloned from those installed strings,
 owned by their native parent list, and never added to the stock tuning package.
