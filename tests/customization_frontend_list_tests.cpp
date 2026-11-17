@@ -43,6 +43,16 @@ static bool CheckDuplicateGroups() {
 
 int main() {
     static_assert(sizeof(void*)==4,"Exercise the actual PC x86 calling convention");
+    uint32_t source[23]{},clone[23]{},draw[17]{},copy[17]{};
+    for(unsigned i=0;i<17;++i)draw[i]=0x3F800000+i;
+    source[11]=reinterpret_cast<uint32_t>(draw);source[12]=sizeof(draw);
+    clone[11]=reinterpret_cast<uint32_t>(copy);clone[12]=sizeof(copy);
+    if(!CustomizationFrontendList::CopyDrawData(clone,source)||std::memcmp(draw,copy,sizeof(draw))||
+       !(clone[7]&0x400000))return 6;
+    copy[7]=0;
+    if(draw[7]==0||source[11]==clone[11])return 7;
+    clone[12]=sizeof(copy)-4;
+    if(CustomizationFrontendList::CopyDrawData(clone,source))return 8;
     // Relocation-free instructions of the inspected PC function 5B2160..5B21AB.
     // Run the production adapter against native insertion, including its null
     // predecessor branch and unlinked-node ABADCAFE sentinels from the crash.

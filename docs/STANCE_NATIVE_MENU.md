@@ -131,3 +131,16 @@ The inspected REDUX InGameB.bun and InGameB.lzc both produce the same 78,452-byt
 independent wrapper. Runtime checks still needed: career/My Cars entry and
 labels, keyboard/controller sliders, linked/front/rear, apply/discard/return,
 profile switching, native pause tuning, race/freeroam appearance and tire FX.
+
+On 2026-11-18 the user confirmed fresh My Cars stance and the renamed Copy
+prompt in the original install. Live inspection found both extra footer labels
+in the visible PC group, with correct text and position but scale (0,0,0).
+Native FEObject copying allocates a zeroed current draw-data block (5C323B..
+5C325A). New labels now copy the source's first 44h bytes of current appearance
+into their separate allocation before positioning; no source pointer is shared.
+The header now contains only Stance and axle selection. Rows show metres or
+degrees and a right-justified cloned label for the signed configured range.
+Successful cart submission explicitly plays native cue 50, the same cue returned
+for suspension/brakes by PC CustomizePerformance::NotifySoundMessage (7A7130).
+The cloned tuning screen's generic select cue is suppressed. Visible layout,
+sound and Showcase focus recovery still require verification of this revision.

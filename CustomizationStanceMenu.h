@@ -41,6 +41,7 @@ static unsigned ResetConfirmed=0,ResetAll=0,ResetDismissed=0,ResetAxle=0;
 static unsigned ResetSelectedLabel=0,ResetAllLabel=0;
 struct FooterGroup {DWORD* object;std::array<DWORD*,2> reset{},showcase{};};
 static std::vector<FooterGroup> FooterGroups;
+static std::array<DWORD*,6> LimitLabels{};
 static int ResetChannel=-1;
 static uint64_t ResetOwner=0;
 struct SavedText {DWORD* object;unsigned name,language,flags;std::wstring text;};
@@ -89,9 +90,9 @@ static DrawFn OriginalDraw=nullptr;
 using SoundFn=int(__thiscall*)(DWORD*,unsigned,int);
 static SoundFn OriginalSound=nullptr;
 static int __fastcall Sound(DWORD* screen,void*,unsigned message,int sound) {
-    // Native customization uses the generic installation cue for suspension.
-    // Keep dialog sounds and every unrelated screen on their original path.
-    if(screen==Screen&&ResetChannel<0&&sound==4)return 50;
+    // Successful cart submission plays its own suspension/brake cue. Suppress
+    // the cloned tuning package's generic select cue, retaining dialog sounds.
+    if(screen==Screen&&ResetChannel<0&&sound==4)return -1;
     return OriginalSound(screen,message,sound);
 }
 static void InstallFeedback() {
@@ -254,6 +255,7 @@ static void Footer() {
                     char name[64]{};sprintf_s(name,"MWCL_FOOTER_%u_%u_%u",unsigned(at-FooterGroups.begin()),action,i);
                     prompt[0x10/4]=bStringHash(name);
                     prompt[0x58/4]=0; // Native package owns clone; its render cache must be fresh.
+                    CustomizationFrontendList::CopyDrawData(prompt,labels[i]);
                     CustomizationFrontendList::AppendChild(group,prompt,FEMinList_AddNode);
                 }
                 auto data=reinterpret_cast<const float*>(labels[i][0x2C/4]);
@@ -270,19 +272,9 @@ static void Footer() {
     }
 }
 static void Heading(const char* error=nullptr) {
-    const char* modes[]={"BOTH","FRONT","REAR"};
+    const char* modes[]={"Both","Front","Rear"};
     char caption[160]{};
-    const int channel=Screen?SliderIndex(reinterpret_cast<DWORD*>(Screen[0x34/4])):-1;
-    if(channel>=0&&channel<6) {
-        const unsigned axle=EditSession.axle==2?1:0;
-        char current[48]{};
-        if(!EditSession.axle&&EditSession.Value(channel,0)!=EditSession.Value(channel,1))
-            sprintf_s(current,"%.4g/%.4g",double(EditSession.Value(channel,0)),double(EditSession.Value(channel,1)));
-        else sprintf_s(current,"%.4g",double(EditSession.Value(channel,axle)));
-        sprintf_s(caption,"STANCE: %s | %s %s %s [%.4g .. %.4g]",modes[EditSession.axle],Labels[channel],current,
-            channel==2?"deg":"m",double(EditSession.info.minimum[channel]),double(EditSession.info.maximum[channel]));
-    }
-    else sprintf_s(caption,"STANCE: %s | LT/RT AXLE | RB FINE | LB FAST",modes[EditSession.axle]);
+    sprintf_s(caption,"Stance | %s",modes[EditSession.axle]);
     // These objects belong to our independent package clone. The race tuning
     // package and its labels remain untouched and every edit is restored on exit.
     // HEADERTEXT itself is a group in the stock PC asset. Update both actual
@@ -336,6 +328,31 @@ static void InstallShowcase() {
     }
     ShowcaseAvailable=true;
 }
+static void Limits(DWORD* title,unsigned index) {
+    auto& label=LimitLabels[index];
+    if(!label) {
+        auto package=reinterpret_cast<DWORD*(__thiscall*)(void*,const char*)>(0x516AF0)(
+            *reinterpret_cast<void**>(0x91CADC),Package);
+        if(!package)return;
+        CustomizationFrontendList::GroupContaining<DWORD> parent(title);
+        reinterpret_cast<bool(__thiscall*)(DWORD*,decltype(parent)*)>(0x5B1560)(package,&parent);
+        if(!parent.group)return;
+        label=(*reinterpret_cast<DWORD*(__thiscall**)(DWORD*,bool)>(title[0]+4))(title,false);
+        if(!label)return;
+        char name[48]{};sprintf_s(name,"MWCL_STANCE_LIMIT_%u",index);
+        label[0x10/4]=bStringHash(name);label[0x58/4]=0;
+        CustomizationFrontendList::CopyDrawData(label,title);
+        label[0x6C/4]=(label[0x6C/4]&~3u)|2u; // Native FEString horizontal right justification.
+        CustomizationFrontendList::AppendChild(parent.group,label,FEMinList_AddNode);
+        auto data=reinterpret_cast<float*>(label[0x2C/4]);
+        if(data&&label[0x30/4]>=0x44) {
+            float position[]={250.f,data[8],data[9]};
+            reinterpret_cast<void(__thiscall*)(DWORD*,const float*,bool)>(0x5B8190)(label,position,false);
+        }
+    }
+    char text[96]{};sprintf_s(text,"[%+.3g .. %+.3g]",double(EditSession.info.minimum[index]),double(EditSession.info.maximum[index]));
+    SetText(label,text,false);
+}
 static void __fastcall Draw(DWORD* slider,void*) {
     const int index=SliderIndex(slider);
     if(!Screen||index<0){OriginalDraw(slider);return;}
@@ -360,11 +377,14 @@ static void __fastcall Draw(DWORD* slider,void*) {
             sprintf_s(value,"%.3g/%.3g",double(EditSession.Value(index,0)),double(EditSession.Value(index,1)));
         else sprintf_s(value,"%.4g%s",double(EditSession.Value(index,axle)),(EditSession.active.mask&(1u<<i))?"":"*");
     }
-    const char* label=index==6?"Enabled":Labels[index];
+    char label[48]{};
+    if(index==6)strcpy_s(label,"Enabled");
+    else sprintf_s(label,"%s (%s)",Labels[index],index==2?"deg":"m");
     // The stock tuning asset may omit OPTION_DATA_n. Its title is still a
     // complete usable row: include the absolute value there instead of rejecting it.
     char caption[160]{};sprintf_s(caption,separate?"%s":"%s: %s",label,value);
     SetText(title,caption);if(separate)SetText(data,value);
+    if(index<6)Limits(title,unsigned(index));
 }
 static void Refresh() {
     for(unsigned i=0;i<7;++i)if(auto slider=Sliders[i]) {
@@ -447,7 +467,13 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(message==Back){Cancel();Leave();return;}
     if(message==Accept) {
-        if(Commit())Leave();else Heading("Unable to queue stance. Use a normal shop with an active owned car.");
+        if(Commit()) {
+            // PC CustomizePerformance::NotifySoundMessage (7A7130) uses cue 50
+            // for suspension and brakes. Play it on actual cart success only.
+            if(auto audio=*reinterpret_cast<void**>(0x911FA8))
+                reinterpret_cast<void(__thiscall*)(void*,int)>(0x4AE8F0)(audio,50);
+            Leave();
+        } else Heading("Unable to queue stance. Use a normal shop with an active owned car.");
         return;
     }
     if(message==PreviousAxle||message==NextAxle) {
@@ -528,6 +554,7 @@ static void __fastcall Destructor(DWORD* screen,void*) {
         if(!suspend){Owner=0;Opening=false;}
         ResetChannel=-1;ResetOwner=0;
         FooterGroups.clear();
+        LimitLabels.fill(nullptr);
     }
     OriginalDestructor(screen);
 }
