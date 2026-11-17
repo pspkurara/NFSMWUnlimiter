@@ -31,6 +31,10 @@ static Session EditSession;
 static std::array<DWORD*,7> Sliders{};
 static bool RefreshPending=false;
 static void Refresh();
+static bool ResetDialogAvailable=false;
+static unsigned ResetConfirmed=0,ResetDismissed=0,ResetAxle=0;
+static int ResetChannel=-1;
+static uint64_t ResetOwner=0;
 struct SavedText {DWORD* object;unsigned name,language,flags;std::wstring text;};
 static std::vector<SavedText> SavedStrings;
 static void Remember(DWORD* object) {
@@ -128,6 +132,7 @@ static int Host(const Values* values,int action) {
     return CustomizationSave::Edit(Owner,reinterpret_cast<const CustomizationSave::Values*>(values),action);
 }
 static void Cancel() {
+    ResetChannel=-1;ResetOwner=0;
     if(Owner&&!Finished)CustomizationSave::CancelShop(Owner);
     if(Owner&&!Finished)Host(nullptr,2);
     if(Control&&EditSession.info.token)Control(EditSession.info.token,2,0);
@@ -181,7 +186,7 @@ static void Heading(const char* error=nullptr) {
     // Stock HELP_BUTTON's two FEString children (main and shadow). The widget
     // now copies a channel, so its visible Y prompt must describe that action.
     Text(0x2FBBF8E8,"Copy");Text(0x55FA05C3,"Copy");
-    Text(0x05CDDED4,"A: add to cart   LT/RT: axle   X: inherit   Shift: fine   Ctrl: fast");
+    Text(0x05CDDED4,"A: add to cart   LT/RT: axle   X: reset/help   Shift: fine   Ctrl: fast");
 }
 static void __fastcall Draw(DWORD* slider,void*) {
     const int index=SliderIndex(slider);
@@ -229,6 +234,22 @@ static bool Preview() {
     }
     return true;
 }
+static void ShowResetHelp(unsigned channel) {
+    if(channel>=6)return;
+    if(!ResetDialogAvailable){Heading("Native reset dialog unavailable; no value changed.");return;}
+    const char* axles[]={"front and rear","front","rear"};
+    char text[512]{};
+    sprintf_s(text,"Reset %s (%s) to its inherited vehicle/preset value?\n\n"
+        "Only this parameter and axle selection change. This is a preview; A adds it to the cart, and shop checkout purchases it.\n\n"
+        "LT/RT: select axle. Y: copy to opposite axle. RB/Shift: fine. LB/Ctrl: fast. B: cancel the edit.",
+        Labels[channel],axles[EditSession.axle]);
+    ResetChannel=int(channel);ResetAxle=EditSession.axle;ResetOwner=Owner;
+    // The native helper chooses Dialog.fng in the frontend and owns focus/input.
+    // Its last argument is a printf format; pass text as data, never as the format.
+    using DialogFn=int(__cdecl*)(const char*,const char*,int,unsigned,unsigned,unsigned,unsigned,unsigned,int,const char*,...);
+    reinterpret_cast<DialogFn>(0x598BB0)(Package,"",3,0x70E01038,0x417B25E4,
+        ResetConfirmed,ResetDismissed,ResetDismissed,1,"%s",text);
+}
 static void __fastcall Act(DWORD* slider,void*,const char* package,unsigned message) {
     const int index=SliderIndex(slider);
     if(!Screen||index<0){OriginalAct(slider,package,message);return;}
@@ -261,6 +282,15 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(Closing)return;
     if(!Current()){Cancel();Leave();return;}
+    if(message==ResetConfirmed||message==ResetDismissed) {
+        const int channel=ResetChannel;const auto axle=ResetAxle;const auto owner=ResetOwner;
+        ResetChannel=-1;ResetOwner=0;
+        if(message==ResetConfirmed&&owner==Owner&&channel>=0&&channel<6) {
+            EditSession.SelectAxle(axle);EditSession.Inherit(unsigned(channel));
+            if(Preview())Refresh();
+        } else RefreshPending=true;
+        return;
+    }
     if(message==Back){Cancel();Leave();return;}
     if(message==Accept) {
         if(Commit())Leave();else Heading("Unable to queue stance. Use a normal shop with an active owned car.");
@@ -278,7 +308,7 @@ static void __fastcall Notify(DWORD* screen,void*,unsigned message,void* object,
     }
     if(message==Inherit) {
         auto selected=reinterpret_cast<DWORD*>(screen[0x34/4]);const int index=SliderIndex(selected);
-        if(index>=0&&index<6){EditSession.Inherit(unsigned(index));if(Preview())Refresh();}return;
+        if(index>=0&&index<6)ShowResetHelp(unsigned(index));return;
     }
     // UIWidgetMenu also handles text-input widgets and destructive screen resets.
     // TuningSlider has neither layout: forward only verified navigation/draw paths.
@@ -334,6 +364,7 @@ static DWORD* __cdecl Factory(DWORD* data) {
 static void __fastcall Destructor(DWORD* screen,void*) {
     if(screen==Screen) {
         if(!Finished)Cancel();RestoreText();Screen=nullptr;Sliders.fill(nullptr);Owner=0;Opening=false;Closing=false;RefreshPending=false;
+        ResetChannel=-1;ResetOwner=0;
     }
     OriginalDestructor(screen);
 }
@@ -430,6 +461,9 @@ static bool Install() {
         CustomizationSave::Log("Native stance menu disabled: cart ownership hooks unavailable.");return false;
     }
     NameHash=bStringHash("MWCL_STANCE_ADJUSTMENT");PackageHash=0xFFFFFFFF;
+    ResetConfirmed=bStringHash("MWCL_STANCE_RESET_CONFIRMED");ResetDismissed=bStringHash("MWCL_STANCE_RESET_DISMISSED");
+    const BYTE dialogEntry[]={0x8B,0x4C,0x24,0x28,0x8B,0x54,0x24,0x24,0x8D,0x44,0x24,0x2C};
+    ResetDialogAvailable=std::memcmp(reinterpret_cast<const void*>(0x598BB0),dialogEntry,sizeof(dialogEntry))==0;
     for(const unsigned char* c=reinterpret_cast<const unsigned char*>(Package);*c;++c)PackageHash=PackageHash*33+std::toupper(*c);
     size_t created=0;bool ok=true;
     for(const auto& hook:hooks){if(MH_CreateHook(reinterpret_cast<void*>(hook.address),hook.replacement,hook.original)!=MH_OK){ok=false;break;}++created;}

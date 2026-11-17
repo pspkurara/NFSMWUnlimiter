@@ -19,9 +19,11 @@ For a later test installation:
    in its supplied INI and remains experimentally unverified.
 4. The Parts/body shop contains an owned-car Stance adjustment entry. Its
    sliders use a private in-memory copy of the installed stock game template.
-   No Binary edit or copied game asset is required. Native UI verification is
-   still pending. Accept stages a free grouped adjustment for the next normal
-   save; Back discards it. The separate debug editor hotkey is off by default.
+   No Binary edit or copied game asset is required. A queues the adjustment in
+   the native cart; shop checkout purchases it. B cancels the current edit,
+   and removing the cart item restores the purchased stance. X opens native
+   reset/help confirmation. Full native UI validation remains incomplete.
+   The separate debug editor hotkey is off by default.
    Set DebugEditorHotkey=1 deliberately to use EditorKey (default F6).
 5. F7 from the native PC Controls screen opens driving-camera bindings.
    Apply returns changes to the native controls confirmation transaction.
