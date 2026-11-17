@@ -37,8 +37,10 @@ stick to menu directions must remove that duplicate mapping; the game's final
 PAD_LEFT/PAD_RIGHT notifications do not preserve reliable device provenance.
 
 Driver preview bypasses only the front-end driver hide condition while the
-driver selection screen (menu ID `0x308`) is active. It does not turn on a missing
-mesh, enable a disabled part, change NIS driver visibility, or touch a saved car.
+driver selection screen (menu ID `0x308`) is active. Within that preview it also
+bypasses the separate NIS visibility flags, preserving their global values.
+It does not turn on a missing mesh, enable a disabled part, alter actual NIS
+scenes or touch a saved car.
 Screen destruction clears preview state. Ordinary menus and racing keep the
 existing visibility rules.
 
