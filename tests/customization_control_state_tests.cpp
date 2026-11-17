@@ -9,6 +9,12 @@ using namespace CustomizationControls;
 void require(bool b,const char* text){if(!b)throw std::runtime_error(text);}
 int main(){try{
     {
+    require(CustomizationGarageInput::ButtonAmount(0,0xFFFF,255,255)==0,"disabled zoom binding ignores all inputs");
+    require(CustomizationGarageInput::ButtonAmount(0x100,0x100,0,0)==1,"shoulder zoom binding uses button state");
+    require(CustomizationGarageInput::ButtonAmount(0x10000,0,30,255)==0,"left trigger binding ignores right trigger and deadzone");
+    require(CustomizationGarageInput::ButtonAmount(0x20000,0,255,255)==1,"full right trigger zoom reaches full speed");
+    require(CustomizationGarageInput::ButtonAmount(0x10000,0,120,0)>.39f&&
+        CustomizationGarageInput::ButtonAmount(0x10000,0,120,0)<.41f,"zoom trigger preserves analog pressure");
     CustomizationGarageInput::FocusBoundary focus;
     require(!focus.Observe(true,100,1)&&focus.Observe(true,116,1),"first garage frame waits for fresh input");
     require(!focus.Observe(true,1116,1),"paused frontend detects focus boundary without a background update");
