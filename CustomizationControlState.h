@@ -104,6 +104,11 @@ inline void ApplyAxes(const State& s,float x,float y,float dt,float& yaw,float& 
         pitch=std::fmax(-s.pitchLimit,std::fmin(s.pitchLimit,pitch+y*s.speed*dt));
     }
 }
+// Enabling vehicle lock alone must never take over the normal driving camera.
+// A held forward direction still counts as input even though its azimuth is 0.
+inline bool CameraOverride(const State& s,float x,float y,float yaw,float pitch,float zoom,bool reset,bool owned=false) {
+    return yaw!=0||pitch!=0||zoom!=1||(!reset&&(owned||(s.vehicleHeading&&(x!=0||y!=0))));
+}
 inline void ResetDevice(State& s,bool controller) {
     State defaults;
     if(controller) {

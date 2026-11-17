@@ -75,6 +75,14 @@ int main(){try{
     require(session.Apply(next)&&session.Dirty(),"new camera policies participate in native controls confirmation");
     session.Restore();require(!session.active.vehicleHeading&&!session.active.hideMirror,"discard restores camera policies");
     using namespace CustomizationOrbit;
+    next=State{};next.vehicleHeading=1;next.orbitMode=1;
+    require(!CameraOverride(next,0,0,0,0,1,false),"vehicle lock enabled at neutral leaves the native driving camera unchanged");
+    require(CameraOverride(next,0,1,0,0,1,false),"held forward direction locks even with zero azimuth");
+    require(!CameraOverride(next,0,1,0,0,1,true),"reset releases vehicle lock even with a held direction");
+    require(CameraOverride(next,0,0,90,0,1,false),"retained rate/mouse rotation remains a custom view");
+    require(CameraOverride(next,0,0,0,0,1,false,true),"mouse or rate ownership retains a zero-angle custom camera until release");
+    require(!CameraOverride(next,0,0,0,0,1,true,true),"native reset releases a zero-angle owned camera");
+    require(CameraOverride(next,0,0,0,0,.5f,false),"explicit zoom retains its camera override");
     const Pose native={{1,2,3},{11,2,3}};Pose result;
     require(Rotate(native,90,0,true,result)&&result.eye.x==1&&result.eye.y==2&&result.eye.z==3&&
         std::fabs(result.look.x-1)<.001f&&std::fabs(result.look.y-12)<.001f,"first-person rotation retains exact eye position");
