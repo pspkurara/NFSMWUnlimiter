@@ -69,7 +69,10 @@ try:
     engine = word(word(0x91CADC))
     result = dict(pid=args.pid, gameFlow=word(0x925E90), engine=hex(engine), packages=[],
                   hooks={hex(a): read(a, 16).hex(' ') for a in (0x7A48F0, 0x7B9F23, 0x7A2310)},
-                  viewerRide=read(0x9BA088, 0x310).hex())
+                  viewerRide=read(0x9BA088, 0x310).hex(),
+                  garageLoader=dict(address='0x9ba3a0', loadingRide=read(0x9BA3A0, 0x310).hex(),
+                                    currentRide=read(0x9BA6B0, 0x310).hex(),
+                                    flags=read(0x9BA9C0, 16).hex()))
     seen = set()
     for offset in (0xE0, 0xF0):
         for package in chain(word(engine + offset), 64):

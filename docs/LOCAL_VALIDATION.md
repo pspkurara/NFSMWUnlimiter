@@ -190,3 +190,13 @@ state. After checking the exact executable path and exit code, that leftover
 process was terminated; its process object then signaled and installation passed.
 The installer distinguishes signaled terminated process objects still listed by
 CIM from live or unsignaled ones, and fails closed on query/permission errors.
+
+## Follow-ups reported on 2026-11-18
+
+- Main-menu Quit does not display its confirmation dialog; cause unconfirmed.
+- Losing focus during file-based FMVs (logos/story, reportedly any video) can
+  freeze playback and input on return. This is not the 3D NIS/cinematic case.
+- Stance acceptance sound is still unchanged in the original installation.
+  Use the suspension/brake performance-part cue; lower priority than geometry.
+- Stance header/units/right-aligned bounds presentation is deferred until the
+  current viewer, body FX and action-prompt fixes pass runtime QA.

@@ -107,6 +107,16 @@ static void __fastcall NativeWriteRecord(void* record,void*,DWORD* ride) {
     std::memcpy(record,ride,sizeof(DWORD));
 }
 static void __fastcall NativeBuildUnowned(DWORD*,void*,uint32_t,int,DWORD*) {}
+static bool garageReady=false;
+static void __fastcall NativeGarageLoad(DWORD* loader,void*,DWORD* ride) {
+    std::memcpy(loader,ride,0x310);*(reinterpret_cast<BYTE*>(loader)+0x620)=1;
+}
+static void __fastcall NativeGarageUpdate(DWORD* loader,void*) {
+    if(!garageReady||!*(reinterpret_cast<BYTE*>(loader)+0x620))return;
+    std::memcpy(loader+0x310/4,loader,0x310);
+    *(reinterpret_cast<BYTE*>(loader)+0x620)=0;
+    *(reinterpret_cast<BYTE*>(loader)+0x621)=1;
+}
 int main() {
     directory=fs::current_path()/("save-fixture-"+std::to_string(GetCurrentProcessId()));
     fs::create_directories(directory/"NFS Most Wanted"/"Alpha");
@@ -246,6 +256,19 @@ int main() {
     std::vector<DWORD> unknown=ride;
     Check(!TrackRideCopy(unknown.data(),ai.data())&&Resolve(ai.data(),0,2,0)==0,
         "menu allocation reuse with an unknown source drops old ownership");
+    std::vector<DWORD> garageLoader(0x630/4);
+    OriginalGarageLoad=reinterpret_cast<GarageLoadFn>(&NativeGarageLoad);
+    OriginalGarageUpdate=reinterpret_cast<GarageUpdateFn>(&NativeGarageUpdate);
+    GarageLoad(garageLoader.data(),nullptr,ride.data());
+    Check(Resolve(garageLoader.data(),0,2,0)==-2.5f,"Garage loading copy retains exact owned provenance");
+    GarageUpdate(garageLoader.data(),nullptr);
+    Check(Resolve(garageLoader.data()+0x310/4,0,2,0)==0,"Unfinished loading cannot bind the displayed slot");
+    garageReady=true;GarageUpdate(garageLoader.data(),nullptr);
+    Check(Resolve(garageLoader.data()+0x310/4,0,2,0)==-2.5f,
+        "Initial My Cars promotion retains purchased stance before customization");
+    GarageLoad(garageLoader.data(),nullptr,unknown.data());GarageUpdate(garageLoader.data(),nullptr);
+    Check(Resolve(garageLoader.data()+0x310/4,0,2,0)==0,
+        "An identical unowned replacement clears both garage loader stages");
     auto customization=reinterpret_cast<BYTE*>(stable)+0xFA0+0x198;
     customization[0x194]=1;
     Check(BindRaceCustomization(ai.data(),customization,0)&&Resolve(ai.data(),0,2,0)==-2.5f,

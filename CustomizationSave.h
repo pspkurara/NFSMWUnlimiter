@@ -441,6 +441,25 @@ static void __cdecl SetViewerRide(DWORD* ride,int reason,int whichCar) {
     TrackRideCopy(ride,reinterpret_cast<DWORD*>(GlobalAddress(0x9BA088)));
     OriginalSetViewerRide(ride,reason,whichCar);
 }
+using GarageLoadFn=void(__thiscall*)(DWORD*,DWORD*);
+using GarageUpdateFn=void(__thiscall*)(DWORD*);
+static GarageLoadFn OriginalGarageLoad=nullptr;
+static GarageUpdateFn OriginalGarageUpdate=nullptr;
+static void __fastcall GarageLoad(DWORD* loader,void*,DWORD* ride) {
+    OriginalGarageLoad(loader,ride);
+    // LoadRideInfo stores a private 0x310-byte loading copy. The native loader
+    // first changes only its composite texture name, outside our fingerprint.
+    TrackRideCopy(ride,loader);
+}
+static void __fastcall GarageUpdate(DWORD* loader,void*) {
+    const bool loading=*(reinterpret_cast<const BYTE*>(loader)+0x620)!=0;
+    OriginalGarageUpdate(loader);
+    // Update promotes LoadingRideInfo to CurrentRideInfo before the frontend
+    // constructs/refreshes the car. Observe only that actual 1 -> 0 transition.
+    if(loading&&!*(reinterpret_cast<const BYTE*>(loader)+0x620)&&
+       *(reinterpret_cast<const BYTE*>(loader)+0x621))
+        TrackRideCopy(loader,loader+0x310/4);
+}
 using ReInitFn=void(__thiscall*)(DWORD*,DWORD*);
 using LoadedRideFn=DWORD*(__thiscall*)(DWORD*,DWORD*,int,int,int);
 static ReInitFn OriginalReInit=nullptr;
@@ -613,6 +632,8 @@ static bool Install() {
         {0x6F4A16,&QuickGameCopyCave,&OriginalQuickGameCopy,{0xF3,0xA5,0x89,0x44,0x24,0x70}},
         {0x741725,&PlayerSetupCopyCave,&OriginalPlayerSetupCopy,{0xF3,0xA5,0x8B,0x7C,0x24,0x18}},
         {0x7A9DB0,&SetViewerRide,reinterpret_cast<void**>(&OriginalSetViewerRide),{0x8B,0x0D,0xDC,0xCA,0x91,0}},
+        {0x7A2790,&GarageLoad,reinterpret_cast<void**>(&OriginalGarageLoad),{0x53,0x8B,0xD9,0x8A,0x83,0x20,0x06,0,0}},
+        {0x7A2850,&GarageUpdate,reinterpret_cast<void**>(&OriginalGarageUpdate),{0x55,0x8B,0xE9,0x8A,0x85,0x20,0x06,0,0}},
         {0x7609B0,&ReInit,reinterpret_cast<void**>(&OriginalReInit),{0x64,0xA1,0,0,0,0}},
         {0x752D20,&LoadedRide,reinterpret_cast<void**>(&OriginalLoadedRide),{0x8B,0x44,0x24,0x0C,0x53,0x55}}
     };

@@ -74,3 +74,11 @@ the same local height/rake transform as the body. Tire/contact processing stays
 outside this scope. A banked-world/nonzero-origin fixture covers the flare pose.
 Live FX alignment remains unverified; this does not establish coverage of every
 other body effect, such as separately generated contrails or headlight history.
+
+Initial viewer lineage now observes GarageCarLoader::LoadRideInfo (7A2790) and
+Update (7A2850): the private loading RideInfo is copied at 7A27FD and promoted to
+the displayed slot at +310 by 7A28A2. This was missing between the static viewer
+and frontend construction. The update adapter binds only an actual completed
+loading transition. Fixtures cover waiting, promotion and replacement with an
+identical unknown car. The original loader is at 9BA3A0, verified in native
+GetGarageCarLoader (7B41C0). Fresh-process My Cars runtime verification is pending.
