@@ -84,3 +84,33 @@ runtime triangle-buffer binding and coordinate/pivot use; measured arch contours
 native axle references; a boundary representation that preserves lower/inner
 wheel geometry. The existing single half-space cannot represent a general wheel
 arch, so automatic fitting must not silently approximate every car with it.
+
+## PC runtime CPU mesh access
+
+Further native disassembly establishes a CPU path without reading a WRITEONLY
+GPU vertex buffer. At 6E03F9/6E0409 the queue item+8 points to a slot containing
+the platform geometry pointer. The platform's material count/table are +10/+14;
+each material record is 68h bytes. CPU indices are at platform+24 with total
+index count +2C; the native loader sets them at 6E3FC8 and uploads to its index
+buffer at 6E3FE9. Each material's +44 is the first index and +40 its triangle
+count, matching DrawIndexedPrimitive arguments at 6E05E2..6E05FC. +5C records
+the material index count. +3C must not be misread as an index count.
+
+Material +4C/+50 give CPU vertex source/byte length; +54 is the GPU buffer and
++58 the complete stream vertex count. Effect descriptor +34 points to stride at
+descriptor+8. At 6E40E7..6E40F3 subsequent materials sharing the previous effect
+have their CPU pointer/size cleared while retaining the shared GPU buffer and
+stream count. Resolve their source from the preceding record in the same
+contiguous effect run, with table, effect and buffer identity checks. Never
+read backwards outside the containing platform table.
+
+A bounded read-only inspection of the running validation process found 66
+queue-resident material records (19,681 triangles) satisfying table membership,
+index count/range, shared source, 36-byte stride and buffer-length checks. Shared
+materials referenced their first stream record as expected. These are resident
+queue entries, potentially stale: they do NOT prove the currently selected car,
+actual draw ownership, all vertex formats or frontend instance identity. A cached
+car pointer from an earlier BodyTrace had already been reused by UI allocations,
+demonstrating why production capture must occur inside the verified submission
+scope rather than dereferencing previous log addresses. Runtime copying still
+needs resource lifetime/selected model correspondence and per-draw transforms.

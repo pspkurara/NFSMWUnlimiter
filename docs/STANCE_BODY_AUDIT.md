@@ -89,3 +89,8 @@ and the private game's log are retained outside the repository. Four parser
 fixtures cover preserved native reflections, an incorrect translation, process
 ID-counter restarts and missing world-transform evidence:
 `python -m unittest discover -s tests -p body_trace_tests.py`.
+
+The user subsequently visually confirmed that the Fiat now lowers correctly in
+this test installation. This confirms the reported uniform-height case, not all
+vehicles, rake configurations or race effects. Shop acceptance/reopen behavior
+is a separate confirmed defect tracked in STANCE_CART_INTEGRATION.md.
