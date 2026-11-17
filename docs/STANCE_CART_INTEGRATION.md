@@ -82,6 +82,17 @@ invalid input, purchased-state exclusion and eight accept/reopen adjustments
 that must stop at the same absolute lower bound. This code is not yet connected
 to the running adapter and does not itself fix the live shop.
 
+The owned-car host now owns this Shop instance. BeginShop/PreviewShop/CancelShop/
+AcceptShop/RemoveShop and the two checkout callbacks validate the current token
+and keep cart acceptance out of Pending. NativeMenuOwner reads queued absolute
+values, frontend resolution sees the shop snapshot and race resolution still
+uses purchased values only. Profile load, native memory restore and native car
+record reuse clear transient shop state. The production save fixture exercises
+these paths and proves native save snapshots exclude cart values, including
+reopening a queued item and cancelling its later edit. All 12 root tests pass.
+The UI does not call these new entry points until the native cart adapter is
+complete: accepting the currently installed screen remains the known defect.
+
 Connect it to a guarded PC
 adapter using a tagged native cart item, retaining native allocation/destruction
 and list ownership. Check the actual native UI row formatting before introducing

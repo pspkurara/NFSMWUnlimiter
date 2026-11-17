@@ -68,6 +68,30 @@ int main() {
     Check(!Preview.empty()&&Resolve(ride.data(),0,2,0)==-2.5f,
         "First race update ignores a lingering menu preview before render clears its context");
     Check(Edit(9,nullptr,2)==1&&Resolve(ride.data(),0,2,0)==-2.5f,"Discard restores committed stance after transition");
+    *reinterpret_cast<int*>(FixtureAddress(0x925e90))=3;
+    Check(BeginShop(9,true),"Native shop starts from purchased owned values");
+    auto cartValue=value;cartValue.values[4]=-6.f;
+    Check(PreviewShop(9,cartValue,true)&&Resolve(ride.data(),0,2,0)==-6.f,"Shop edit previews in frontend");
+    const auto revision=AcceptShop(9);
+    Check(revision&&Pending.at(key).values[4]==-2.5f,"Accept queues without purchasing");
+    uint64_t menuOwner=0;Values menuValues;
+    Check(NativeMenuOwner(menuOwner,menuValues)&&menuOwner==9&&menuValues.values[4]==-6.f,
+          "Reopening native sliders reads queued absolute values");
+    BeginOwnedSave(nullptr,&saveBuffer,1);EndOwnedSave(nullptr,&saveBuffer,1);
+    Check(Saving.at(key).values[4]==-2.5f,"Native disk save excludes shopping cart");
+    *reinterpret_cast<int*>(FixtureAddress(0x925e90))=6;
+    Check(Resolve(ride.data(),0,2,0)==-2.5f,"Race ignores unpurchased cart");
+    *reinterpret_cast<int*>(FixtureAddress(0x925e90))=3;
+    Check(BeginShop(9,true)&&PreviewShop(9,previewValue,true)&&CancelShop(9),"Cancel a queued item edit");
+    Check(Resolve(ride.data(),0,2,0)==-6.f,"Editor cancel restores existing cart");
+    Check(BeginShopCheckout(9,revision)&&EndShopCheckout(9,false)&&Resolve(ride.data(),0,2,0)==-6.f,
+          "Failed checkout retains cart preview");
+    Check(BeginShopCheckout(9,revision)&&EndShopCheckout(9,true)&&Pending.at(key).values[4]==-6.f,
+          "Successful native checkout promotes once");
+    Check(!EndShopCheckout(9,true)&&!EndShopCheckout(9,false),"Stale checkout cannot finalize");
+    Check(NativeMenuOwner(menuOwner,menuValues)&&menuValues.values[4]==-6.f,"Purchased values survive reopen");
+    Shop.Clear();Check(Edit(9,&value,1)==1,"Restore fixture purchased baseline");
+    *reinterpret_cast<int*>(FixtureAddress(0x925e90))=6;
     auto ai=ride;Check(Resolve(ai.data(),0,2,0)==0,"Unknown identical AI remains native");
     Check(TrackRideCopy(ride.data(),ai.data())&&Resolve(ai.data(),0,2,0)==-2.5f,
         "observed menu/loader RideInfo copy inherits stance before opening customization");

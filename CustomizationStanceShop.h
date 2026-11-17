@@ -25,6 +25,7 @@ public:
         return Owns(owner)&&preview_?&*preview_:Initial(owner);
     }
     const Item* Cart(uint64_t owner) const {return Owns(owner)&&cart_?&*cart_:nullptr;}
+    bool CheckingOut(uint64_t owner) const {return Owns(owner)&&checkout_.has_value();}
     bool Begin(uint64_t owner) {
         const auto initial=Initial(owner);if(!initial||editing_||checkout_)return false;
         preview_=*initial;editing_=true;return true;

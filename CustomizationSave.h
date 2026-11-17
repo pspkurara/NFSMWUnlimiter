@@ -4,6 +4,7 @@
 #include <MinHook.h>
 #include "CustomizationProfileStorage.h"
 #include "CustomizationProfileHost.h"
+#include "CustomizationStanceShop.h"
 #include <array>
 #include <vector>
 #include <map>
@@ -31,7 +32,7 @@ using CustomizationProfileStorage::ProfileDirectory;
 using CustomizationProfileStorage::Crc;
 using CustomizationProfileStorage::Digest;
 using CustomizationProfileStorage::CurrentProfile;
-struct Values { uint32_t size = sizeof(Values), mask = 0; float values[12]{}; };
+using Values=CustomizationStance::Values;
 static_assert(sizeof(Values) == 56, "Owned editor ABI 1");
 struct Key {
     uint32_t handle{}, frontend{}, vehicle{};
@@ -55,6 +56,7 @@ struct Binding { Key key; uint64_t fingerprint{}; };
 using State = std::map<Key, Values>;
 static std::mutex Mutex;
 static State Pending, Preview, Saving;
+static CustomizationStance::Shop Shop;
 static std::map<const DWORD*,Binding> Rides;
 static std::map<const void*,Binding> CustomizationCopies;
 static std::map<Key,uint64_t> Tokens;
@@ -102,7 +104,7 @@ static bool CurrentKey(const Key& key) {
 }
 static void LoadLocked(const std::string& name) {
     if(TransientReset)TransientReset();
-    Profile=name; Pending.clear();Preview.clear();Rides.clear();CustomizationCopies.clear();Tokens.clear();ActiveEditorToken=0;
+    Profile=name; Pending.clear();Preview.clear();Shop.Clear();Rides.clear();CustomizationCopies.clear();Tokens.clear();ActiveEditorToken=0;
     Saving.clear();SaveCaptured=false;SavingProfile.clear();
     try {
         auto directory=ProfileDirectory(name); if(directory.empty()) return;
@@ -190,12 +192,56 @@ static bool NativeMenuOwner(uint64_t& token,Values& values) {
     for(const auto& entry:Tokens)if(entry.second==ActiveEditorToken&&CurrentKey(entry.first)) {
         token=entry.second;values=Values{};
         auto found=Pending.find(entry.first);if(found!=Pending.end())values=found->second;
+        if(auto initial=Shop.Initial(token))values=initial->values;
         return true;
     }
     return false;
 }
 static bool NativeMenuOwnerCurrent(uint64_t token) {
     uint64_t current=0;Values ignored;return NativeMenuOwner(current,ignored)&&current==token;
+}
+// Native cart operations never write a sidecar. Only successful checkout may
+// promote this shop's absolute values into the purchased profile state.
+static bool BeginShop(uint64_t token,bool enabled) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    if(!HooksReady||token!=ActiveEditorToken)return false;
+    for(const auto& entry:Tokens)if(entry.second==token&&CurrentKey(entry.first)) {
+        Values purchased;
+        auto found=Pending.find(entry.first);if(found!=Pending.end())purchased=found->second;
+        return Shop.Enter(token,{purchased,enabled})&&Shop.Begin(token);
+    }
+    return false;
+}
+static bool PreviewShop(uint64_t token,const Values& values,bool enabled) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    return token==ActiveEditorToken&&ValidValues(values)&&Shop.Preview(token,{values,enabled});
+}
+static bool CancelShop(uint64_t token) {
+    std::lock_guard<std::mutex> lock(Mutex);return Shop.Cancel(token);
+}
+static uint64_t AcceptShop(uint64_t token) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    return token==ActiveEditorToken?Shop.Accept(token):0;
+}
+static bool RemoveShop(uint64_t token,uint64_t revision) {
+    std::lock_guard<std::mutex> lock(Mutex);return Shop.Remove(token,revision);
+}
+static bool BeginShopCheckout(uint64_t token,uint64_t revision) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    for(const auto& entry:Tokens)if(entry.second==token&&CurrentKey(entry.first))
+        return Shop.BeginCheckout(token,revision);
+    return false;
+}
+static bool EndShopCheckout(uint64_t token,bool succeeded) {
+    std::lock_guard<std::mutex> lock(Mutex);EnsureProfileLocked();
+    if(!Shop.CheckingOut(token))return false;
+    for(const auto& entry:Tokens)if(entry.second==token&&CurrentKey(entry.first)) {
+        const auto purchased=Shop.EndCheckout(token,succeeded);
+        if(!purchased)return !succeeded;
+        if(purchased->values.mask)Pending[entry.first]=purchased->values;else Pending.erase(entry.first);
+        return true;
+    }
+    Shop.Clear();return false;
 }
 static void EditorContext(DWORD* ride) {
     if(!HooksReady) return;
@@ -231,8 +277,17 @@ static float Resolve(DWORD* ride,int axle,int channel,float fallback) {
     // Tire/contact updates can run before the first race Render clears the
     // editor context. An unfinished frontend preview must never affect racing.
     auto preview=Preview.find(key);
-    if(*reinterpret_cast<const int*>(GlobalAddress(0x925E90))==3&&preview!=Preview.end()) value=&preview->second;
-    else {auto pending=Pending.find(key);if(pending!=Pending.end()) value=&pending->second;}
+    if(*reinterpret_cast<const int*>(GlobalAddress(0x925E90))==3) {
+        if(preview!=Preview.end())value=&preview->second;
+        else {
+            const auto token=Tokens.find(key);
+            if(token!=Tokens.end())if(auto visible=Shop.Visible(token->second)) {
+                if(!visible->enabled)return fallback;
+                value=&visible->values;
+            }
+        }
+    }
+    if(!value){auto pending=Pending.find(key);if(pending!=Pending.end())value=&pending->second;}
     unsigned bit=unsigned(channel*2+axle);
     return value && (value->mask&(1u<<bit)) ? value->values[bit] : fallback;
 }
@@ -295,7 +350,7 @@ static void __cdecl EndOwnedLoad(void*,const char* profile,void* buffer,uint32_t
     auto backup=Backups.find(buffer);
     if(!native&&backup!=Backups.end()&&backup->second.profile==name) {
         if(TransientReset)TransientReset();
-        Profile=name;Pending=backup->second.pending;Preview.clear();Tokens.clear();Rides.clear();CustomizationCopies.clear();
+        Profile=name;Pending=backup->second.pending;Preview.clear();Shop.Clear();Tokens.clear();Rides.clear();CustomizationCopies.clear();
     } else {LoadLocked(name);Backups.clear();}
 }
 static const CustomizationProfileHost::Observer OwnedObserver={sizeof(CustomizationProfileHost::Observer),1,0x4F574E44,nullptr,
@@ -424,6 +479,7 @@ static DWORD* __fastcall NewCar(DWORD* stable,void*) {
     if(record&&stable==Stable()) {
         std::lock_guard<std::mutex> lock(Mutex);
         auto remove=[&](auto& table){for(auto it=table.begin();it!=table.end();) if(it->first.handle==record[0]) it=table.erase(it);else ++it;};
+        for(const auto& entry:Tokens)if(entry.first.handle==record[0]&&Shop.Owns(entry.second))Shop.Clear();
         remove(Pending);remove(Preview);remove(Tokens);
         for(auto it=Rides.begin();it!=Rides.end();) if(it->second.key.handle==record[0]) it=Rides.erase(it);else ++it;
         for(auto it=CustomizationCopies.begin();it!=CustomizationCopies.end();)
