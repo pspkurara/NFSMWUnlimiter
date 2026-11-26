@@ -1,9 +1,31 @@
 #include "stdio.h"
 #include "InGameFunctions.h"
 
+// The game normally hides the driver in the frontend. Only the driver selection
+// screen needs to bypass that restriction; keep the original race/NIS checks.
+static DWORD* DriverPreviewScreen = nullptr;
+
+// 0x74EC58: cmp ecx, 3; jne 0x74EC5F; xor eax, eax
+void __declspec(naked) DriverPreviewCave_CarRenderInfo_Render()
+{
+	_asm
+	{
+		cmp ecx, 3
+		jne KeepDriverVisibility
+		cmp dword ptr [DriverPreviewScreen], 0
+		jne KeepDriverVisibility
+		xor eax, eax
+
+		KeepDriverVisibility:
+		push 0x74EC5F
+		retn
+	}
+}
+
 void __fastcall CustomizeParts_dtor_Hook(DWORD* _CustomizeParts, void* EDX_Unused)
 {
 	RenderFECarFlares = -1;
+	if (DriverPreviewScreen == _CustomizeParts) DriverPreviewScreen = nullptr;
 	CustomizeParts_dtor(_CustomizeParts);
 }
 
@@ -277,6 +299,7 @@ void __fastcall CustomizeParts_RefreshHeader(DWORD* _CustomizeParts, void* EDX_U
 void __fastcall CustomizeParts_Setup(DWORD* _CustomizeParts, void* EDX_Unused)
 {
 	DWORD MenuID = _CustomizeParts[82];
+	DriverPreviewScreen = MenuID == MenuID::Customize_Visual_Driver ? _CustomizeParts : nullptr;
 	DWORD PartIconNormal = 0, PartIconCF = 0, PartIconCustom = 0;
 	int CarSlotID = 0;
 	int PartCategory = 0;
