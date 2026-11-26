@@ -55,7 +55,7 @@ bool GetForceLODA(unsigned int CarTypeNameHash)
 
 int __fastcall CarPart_GetModelNameHash(DWORD* CarPart, int edx_unused, int a5, int LOD)
 {
-    short CarPartID; // ax
+    WORD CarPartID; // Vanilla zero-extends this 16-bit model-table index.
     DWORD* _CarPartModelTable; // esi
     char PartType; // al
     int MasterCarPartPack;
@@ -63,12 +63,12 @@ int __fastcall CarPart_GetModelNameHash(DWORD* CarPart, int edx_unused, int a5, 
     int BrandName; // eax
     unsigned int CarTypeNameHash; // eax
 
+    CarPartID = *((WORD*)CarPart + 6);
+    if (CarPartID == 0xFFFF) return 0;
+
     CarTypeNameHash = CarPart_GetCarTypeNameHash(CarPart);
     LevelOfDetail = GetForceLODA(CarTypeNameHash) ? 0 : LOD;
     MasterCarPartPack = *(int*)_MasterCarPartPack;
-
-    CarPartID = *((WORD*)CarPart + 6);
-    if (CarPartID == -1) return 0;
 
     _CarPartModelTable = (DWORD*)(*(DWORD*)(MasterCarPartPack + 44) + 24 * CarPartID);
     PartType = *((BYTE*)CarPart + 6);
