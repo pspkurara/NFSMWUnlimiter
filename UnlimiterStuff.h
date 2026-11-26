@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "stdio.h"
 #include <string>
+#include <cstring>
 #include "includes\injector\injector.hpp"
 #include "includes\ini.h"
 
@@ -200,6 +201,11 @@ int Init()
 		injector::WriteMemory(0x8B7EB4, &CustomizeParts_Setup, true); // CustomizeParts::vtable
 		injector::MakeCALL(0x7C01D3, CustomizeParts_dtor_Hook, true); // CustomizeParts::~CustomizeParts(bool)
 		injector::MakeCALL(0x7C01B0, CustomizeParts_Setup, true); // CustomizeParts::CustomizeParts
+
+		// Driver preview: preserve the vanilla gate outside the driver selection screen.
+		const unsigned char driverVisibilityCode[] = { 0x83, 0xF9, 0x03, 0x75, 0x02, 0x33, 0xC0 };
+		if (std::memcmp(reinterpret_cast<const void*>(0x74EC58), driverVisibilityCode, sizeof(driverVisibilityCode)) == 0)
+			injector::MakeJMP(0x74EC58, DriverPreviewCave_CarRenderInfo_Render, true);
 
 		// Spoiler
 		injector::WriteMemory(0x8B7FCC, &CustomizeSpoiler_Setup, true); // CustomizeSpoiler::vtable
